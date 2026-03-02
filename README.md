@@ -31,6 +31,40 @@ print(info())
 
 ---
 
+## CLI
+
+`cadis` also provides a minimal CLI entrypoint:
+
+```bash
+cadis lookup <lat> <lon>
+cadis lookup <lat> <lon> --json
+cadis info
+```
+
+Examples:
+
+```bash
+cadis lookup 25.0330 121.5654
+```
+
+```bash
+cadis lookup 25.0330 121.5654 --json
+```
+
+```bash
+cadis info
+```
+
+CLI mode semantics (v0.1):
+
+* `lookup` calls the same `cadis.lookup()` API as Python mode.
+* Default `lookup` output is human-friendly status text.
+* `lookup --json` prints the full API envelope as JSON.
+* `info` prints the full `cadis.info()` payload as JSON.
+* CLI does not add bootstrap/download orchestration logic.
+
+---
+
 ## Public API
 
 ### `lookup(lat: float, lon: float) -> dict`
