@@ -1,4 +1,4 @@
-"""Cache directory resolution for the cadis facade."""
+"""Cache directory resolution for Cadis control-layer operations."""
 
 from __future__ import annotations
 

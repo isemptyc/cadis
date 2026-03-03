@@ -1,43 +1,28 @@
-"""Public API facade for cadis."""
+"""Public API for Cadis SDK/control-layer operations."""
 
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Callable
+from pathlib import Path
 
 from ._cache import resolve_cache_dir
-from ._errors import normalize_reason
 from ._manager import get_manager
+from .types import (
+    BootstrapResponse,
+    InfoResponse,
+    LookupResponse,
+    LookupState,
+    WorldState,
+)
+from .version import __version__
 
 SCHEMA_VERSION = "1"
-VERSION = "0.1.0"
+VERSION = __version__
+SUPPORTED_ISO2 = ["JP", "TW"]
 
 
-def _to_iso2_list(value: Any) -> list[str]:
-    if isinstance(value, (list, tuple, set)):
-        return sorted({str(v).upper() for v in value if str(v).strip()})
-    return []
-
-
-def _global_info_probe() -> tuple[list[str], list[str]]:
-    """Best-effort static info probe with no lookup/bootstrap side effects."""
-    system_iso2: list[str] = []
-    offline_iso2: list[str] = _offline_iso2_from_cache()
-
-    try:
-        import cadis_global as module
-    except Exception:
-        return system_iso2, offline_iso2
-
-    for attr_name in ("SYSTEM_ISO2", "DEFAULT_ISO2", "SUPPORTED_ISO2"):
-        if not system_iso2 and hasattr(module, attr_name):
-            system_iso2 = _to_iso2_list(getattr(module, attr_name))
-
-    return system_iso2, offline_iso2
-
-
-def _offline_iso2_from_cache() -> list[str]:
-    """Derive cached ISO2s from local cache directory names."""
+def _installed_iso2_from_cache() -> list[str]:
     path = resolve_cache_dir()
     if not path.exists() or not path.is_dir():
         return []
@@ -50,50 +35,202 @@ def _offline_iso2_from_cache() -> list[str]:
     return sorted(set(iso2))
 
 
-def _failure_envelope(reason: Any) -> dict[str, Any]:
+def _failed_output(
+    *,
+    state: LookupState,
+    result: dict[str, Any] | None = None,
+) -> LookupResponse:
     return {
-        "lookup_status": "failed",
         "engine": "cadis",
         "version": VERSION,
-        "reason": normalize_reason(reason),
-        "world_context": None,
-        "admin_result": None,
+        "execution": {"lookup_status": "failed"},
+        "state": state,
+        "result": result,
     }
 
 
-def lookup(lat: float, lon: float) -> dict[str, Any]:
+def _extract_iso2(world_context: Any) -> str | None:
+    if not isinstance(world_context, dict):
+        return None
+    country = world_context.get("country")
+    if not isinstance(country, dict):
+        return None
+    iso2 = country.get("iso2")
+    if not isinstance(iso2, str) or len(iso2.strip()) != 2:
+        return None
+    return iso2.strip().upper()
+
+
+def _world_state_from_context(world_context: Any, *, world_status: str) -> WorldState:
+    if world_status != "ok":
+        return {
+            "status": "failed",
+            "classification": "unknown",
+        }
+    if not isinstance(world_context, dict):
+        return {
+            "status": "failed",
+            "classification": "unknown",
+        }
+
+    world_result = world_context.get("world_result")
+    if isinstance(world_result, dict):
+        world_type = world_result.get("type")
+        if isinstance(world_type, str) and world_type:
+            state: WorldState = {
+                "status": "ok",
+                "classification": world_type,
+            }
+            name = world_result.get("name")
+            if isinstance(name, str) and name.strip():
+                state["name"] = name.strip()
+            return state
+    country = world_context.get("country")
+    if isinstance(country, dict) and isinstance(country.get("iso2"), str):
+        return {
+            "status": "ok",
+            "classification": "country",
+            "iso2": str(country.get("iso2")).upper(),
+        }
+    return {
+        "status": "ok",
+        "classification": "unknown",
+    }
+
+
+def lookup(lat: float, lon: float) -> LookupResponse:
     if not isinstance(lat, (float, int)) or not isinstance(lon, (float, int)):
-        return _failure_envelope(ValueError("invalid coordinate type"))
+        return _failed_output(state={"input": {"status": "invalid"}})
     if lat < -90 or lat > 90 or lon < -180 or lon > 180:
-        return _failure_envelope(ValueError("invalid coordinate range"))
+        return _failed_output(state={"input": {"status": "invalid"}})
 
     manager = get_manager()
+    try:
+        global_lookup = manager.get_or_init_global_lookup()
+        world_result = global_lookup.lookup(float(lat), float(lon))
+    except Exception:
+        return _failed_output(state={"world": {"status": "failed", "classification": "unknown"}})
+
+    if not isinstance(world_result, dict):
+        return _failed_output(state={"world": {"status": "failed", "classification": "unknown"}})
+
+    world_status = str(world_result.get("lookup_status", "failed"))
+    world_context = world_result.get("world_context")
+    world_state = _world_state_from_context(world_context, world_status=world_status)
+
+    if world_status != "ok":
+        return _failed_output(state={"world": world_state})
+
+    iso2 = _extract_iso2(world_context)
+    if iso2 is None:
+        return _failed_output(state={"world": world_state})
 
     try:
-        global_lookup = manager.get_or_init()
-        result = global_lookup.lookup(float(lat), float(lon))
-    except Exception as exc:
-        return _failure_envelope(exc)
+        runtime_handle, dataset_state = manager.get_runtime_readiness(iso2)
+    except Exception:
+        return _failed_output(
+            state={
+                "world": world_state,
+                "dataset": {"status": "invalid", "iso2": iso2},
+            },
+        )
+    if runtime_handle is None:
+        return _failed_output(
+            state={
+                "world": world_state,
+                "dataset": dataset_state,
+            },
+        )
 
-    if not isinstance(result, dict):
-        return _failure_envelope("runtime_invalid_response")
+    try:
+        admin_result = runtime_handle.runtime.lookup(float(lat), float(lon))
+    except Exception:
+        return _failed_output(
+            state={"world": world_state, "dataset": runtime_handle.dataset_state},
+        )
 
-    payload = dict(result)
-    payload["engine"] = "cadis"
-    payload["version"] = VERSION
+    if not isinstance(admin_result, dict):
+        return _failed_output(
+            state={"world": world_state, "dataset": runtime_handle.dataset_state},
+        )
 
-    reason = payload.get("reason")
-    if reason is not None:
-        payload["reason"] = normalize_reason(reason)
+    runtime_status = str(admin_result.get("lookup_status", "failed"))
+    if runtime_status not in {"ok", "partial", "failed"}:
+        runtime_status = "failed"
 
-    return payload
+    return {
+        "engine": "cadis",
+        "version": VERSION,
+        "execution": {"lookup_status": runtime_status},
+        "state": {
+            "world": world_state,
+            "dataset": runtime_handle.dataset_state,
+        },
+        "result": admin_result.get("result"),
+    }
 
 
-def info() -> dict[str, Any]:
-    system_iso2, offline_iso2 = _global_info_probe()
+def bootstrap(
+    iso2: str,
+    *,
+    cache_dir: str | Path | None = None,
+    force_reinstall: bool = False,
+    update_to_latest: bool = False,
+    download_progress: Callable[[str, int, int | None], None] | None = None,
+) -> BootstrapResponse:
+    if not isinstance(iso2, str) or len(iso2.strip()) != 2:
+        return {
+            "engine": "cadis",
+            "version": VERSION,
+            "bootstrap_status": "failed",
+            "state": {"input": {"status": "invalid"}},
+        }
+
+    manager = get_manager()
+    try:
+        payload = manager.bootstrap_runtime(
+            iso2,
+            cache_dir=cache_dir,
+            force_reinstall=force_reinstall,
+            update_to_latest=update_to_latest,
+            download_progress=download_progress,
+        )
+    except Exception:
+        return {
+            "engine": "cadis",
+            "version": VERSION,
+            "bootstrap_status": "failed",
+            "state": {"dataset": {"status": "invalid"}},
+        }
+
+    return {
+        "engine": "cadis",
+        "version": VERSION,
+        **payload,
+    }
+
+
+def reinstall(
+    iso2: str,
+    *,
+    cache_dir: str | Path | None = None,
+    update_to_latest: bool = False,
+    download_progress: Callable[[str, int, int | None], None] | None = None,
+) -> BootstrapResponse:
+    return bootstrap(
+        iso2,
+        cache_dir=cache_dir,
+        force_reinstall=True,
+        update_to_latest=update_to_latest,
+        download_progress=download_progress,
+    )
+
+
+def info() -> InfoResponse:
+    installed_iso2 = _installed_iso2_from_cache()
     return {
         "schema_version": SCHEMA_VERSION,
         "version": VERSION,
-        "system_iso2": system_iso2,
-        "offline_iso2": offline_iso2,
+        "supported_iso2": list(SUPPORTED_ISO2),
+        "installed_iso2": installed_iso2,
     }

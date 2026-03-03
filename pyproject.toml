@@ -4,14 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cadis"
-version = "0.1.0"
-description = "Public facade entrypoint for Cadis global lookup"
+version = "0.2.0"
+description = "Unified Cadis control layer for world resolution, dataset lifecycle, and runtime execution"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [{ name = "Cadis" }]
 dependencies = [
-  "cadis-global>=0.1.0",
   "platformdirs>=4.0",
 ]
 
@@ -22,12 +21,18 @@ dev = [
 
 [project.scripts]
 cadis = "cadis._cli:main"
+cadisd = "cadis._rest:main"
 
 [tool.setuptools]
 include-package-data = true
 
 [tool.setuptools.packages.find]
-include = ["cadis*"]
+include = [
+  "cadis*",
+]
+
+[tool.setuptools.package-data]
+"cadis.world" = ["data/*.cgd", "data/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

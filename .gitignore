@@ -8,8 +8,13 @@ __pycache__/
 *.pyd
 .venv/
 venv/
+.pytest_cache/
+
 
 # PyPI
 dist/
 build/
 *.egg-info/
+
+# Unittests
+tests/

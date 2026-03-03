@@ -1,14 +1,12 @@
 # cadis
 
-`cadis` is the public facade entrypoint of the Cadis system.
+`cadis` is the single public control layer of the Cadis system.
 
-It provides a zero-configuration global lookup interface while hiding
-runtime, dataset, and bootstrap orchestration details.
-
-`cadis` is **not** a runtime, dataset engine, or CDN client.
-It is a thin facade layer built on top of `cadis-global`.
-
----
+It orchestrates:
+- dataset install and bootstrap lifecycle
+- world resolution and runtime execution coordination
+- deterministic state to user-facing actions
+- SDK + CLI + REST integration surfaces
 
 ## Install
 
@@ -16,139 +14,41 @@ It is a thin facade layer built on top of `cadis-global`.
 pip install cadis
 ```
 
----
-
-## Quick Start
+## Quick Start (SDK)
 
 ```python
-from cadis import lookup, info
+from cadis import CadisSDK
 
-result = lookup(25.0330, 121.5654)
-print(result["lookup_status"])
-
-print(info())
+sdk = CadisSDK()
+out = sdk.lookup(25.0330, 121.5654)
+print(out["execution"]["lookup_status"])
 ```
 
----
+## Interaction Modes
 
-## CLI
+- CLI guide: [`docs/cli.md`](docs/cli.md)
+- SDK guide: [`docs/sdk.md`](docs/sdk.md)
+- Docker/REST guide: [`docs/rest.md`](docs/rest.md)
 
-`cadis` also provides a minimal CLI entrypoint:
+## Core APIs
 
-```bash
-cadis lookup <lat> <lon>
-cadis lookup <lat> <lon> --json
-cadis info
-```
-
-Examples:
-
-```bash
-cadis lookup 25.0330 121.5654
-```
-
-```bash
-cadis lookup 25.0330 121.5654 --json
-```
-
-```bash
-cadis info
-```
-
-CLI mode semantics (v0.1):
-
-* `lookup` calls the same `cadis.lookup()` API as Python mode.
-* Default `lookup` output is human-friendly status text.
-* `lookup --json` prints the full API envelope as JSON.
-* `info` prints the full `cadis.info()` payload as JSON.
-* CLI does not add bootstrap/download orchestration logic.
-
----
-
-## Public API
-
-### `lookup(lat: float, lon: float) -> dict`
-
-Zero-configuration lookup entrypoint.
-
-Behavior:
-
-* Lazy initialization on first call
-* No network or bootstrap work at import time
-* Deterministic response envelope
-* Stable public error semantics
-
----
-
-### `info() -> dict`
-
-Returns capability metadata for the current environment.
-
-The output includes:
-
-* `version`: public API version
-* `system_iso2`: ISO2 codes available to this installation
-* `offline_iso2`: ISO2 datasets currently available in local cache
-
-Example:
-
-```json
-{
-  "schema_version": "1",
-  "version": "0.1.0",
-  "system_iso2": ["JP", "TW"],
-  "offline_iso2": ["TW"]
-}
-```
-
-`info()` has no side effects and performs no network operations.
-
----
+- `lookup(lat, lon)`
+- `bootstrap(iso2, ...)`
+- `reinstall(iso2, ...)`
+- `info()`
+- `CadisSDK`
+- `CadisRemoteSDK`
 
 ## Architecture
 
 ```text
-cadis (facade)
-  -> cadis-global
-    -> cadis-runtime
-      -> cadis-core + cadis-cdn
+cadis (public control layer)
+  -> world resolution (`cadis.world`)
+  -> dataset install/provisioning (`cadis.cdn`)
+  -> dataset bootstrap/lookup runtime (`cadis.runtime`)
+  -> deterministic structural engine (`cadis.core`)
+  -> remote REST surface (`cadisd`)
 ```
-
----
-
-## Cache Policy
-
-Cache directory resolution order:
-
-1. `CADIS_CACHE_DIR` environment variable
-2. OS standard cache directory (via `platformdirs`)
-3. Fallback path
-
-Examples:
-
-* macOS: `~/Library/Caches/cadis`
-* Linux: `~/.cache/cadis`
-* Windows: `%LOCALAPPDATA%\\cadis\\Cache`
-
----
-
-## Design Principles
-
-* Facade-only orchestration
-* Lazy initialization
-* Deterministic behavior
-* Minimal public surface
-* Stable error contract
-
----
-
-## Versioning
-
-`cadis` version represents the public API contract.
-
-It does **not** represent dataset version or internal runtime version.
-
----
 
 ## License
 
