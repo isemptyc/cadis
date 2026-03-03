@@ -50,6 +50,25 @@ cadis (public control layer)
   -> remote REST surface (`cadisd`)
 ```
 
+## ISO Code Policy
+
+Cadis uses ISO 3166-1 alpha-2 codes as technical identifiers.
+
+These codes are interpreted strictly according to the ISO 3166 standard and are used solely for data partitioning and administrative dataset selection.
+
+Cadis does not interpret ISO codes as political statements or sovereignty declarations.
+
+---
+
+## Supported ISO 3166-1 Entities
+
+| ISO2 | Name   | Dataset ID | Package Size (tar.gz) | Unpacked Size | Release Date (UTC) |
+|:-----|:-------|:-----------|----------------------:|--------------:|-------------------:|
+| TW   | Taiwan | tw.admin   | 1.8 MB                | 2.0 MB        | 2026-02-28         |
+| JP   | Japan  | jp.admin   | 20.4 MB               | 21.3 MB       | 2026-03-01         |
+
+Additional ISO 3166-1 entity datasets will be published as they become available.
+
 ## License
 
 MIT
