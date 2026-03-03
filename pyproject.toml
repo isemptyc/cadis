@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "cadis"
 version = "0.2.0"
-description = "Unified Cadis control layer for world resolution, dataset lifecycle, and runtime execution"
+description = "Lat/Lon to administrative hierarchy lookup with managed datasets."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
