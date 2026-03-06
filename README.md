@@ -39,6 +39,18 @@ print(out["execution"]["lookup_status"])
 - `CadisSDK`
 - `CadisRemoteSDK`
 
+## Dataset Lockdown
+
+By default, Cadis serves lookups from any installed dataset in the cache folder.
+
+To restrict serving to a subset of installed country datasets, set:
+
+```bash
+export CADIS_ALLOWED_ISO2=TW,JP
+```
+
+When enabled, Cadis fails lookups outside the allowlist with `state.dataset.status = "blocked"` and refuses bootstrap/reinstall for those countries.
+
 ## Architecture
 
 ```text

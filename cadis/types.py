@@ -6,7 +6,7 @@ from typing import Literal, TypedDict
 
 LookupStatus = Literal["ok", "partial", "failed"]
 BootstrapStatus = Literal["ready", "failed"]
-StateStatus = Literal["ok", "failed", "missing", "invalid", "ready", "skipped"]
+StateStatus = Literal["ok", "failed", "missing", "invalid", "ready", "skipped", "blocked"]
 
 
 class ExecutionOutcome(TypedDict):
@@ -28,6 +28,7 @@ class DatasetState(TypedDict, total=False):
     status: StateStatus
     iso2: str
     dataset_dir: str
+    detail_code: str
 
 
 class LookupState(TypedDict, total=False):
@@ -57,3 +58,5 @@ class InfoResponse(TypedDict):
     version: str
     supported_iso2: list[str]
     installed_iso2: list[str]
+    dataset_lockdown_enabled: bool
+    allowed_iso2: list[str]

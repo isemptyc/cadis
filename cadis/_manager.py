@@ -9,6 +9,7 @@ from typing import Any, Callable
 
 from ._cache import resolve_cache_dir
 from ._errors import normalize_reason
+from ._policy import DatasetPolicy, load_dataset_policy_from_env
 
 
 @dataclass
@@ -21,13 +22,28 @@ class _RuntimeHandle:
 class CadisManager:
     """Process-level manager for world + runtime orchestration."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, dataset_policy: DatasetPolicy | None = None) -> None:
         self._global_lookup = None
         self._runtime_handles: dict[str, _RuntimeHandle] = {}
         self._lock = threading.Lock()
+        self._dataset_policy = dataset_policy or load_dataset_policy_from_env()
 
     def is_initialized(self) -> bool:
         return self._global_lookup is not None
+
+    @property
+    def dataset_policy(self) -> DatasetPolicy:
+        return self._dataset_policy
+
+    def _blocked_dataset_state(self, iso2: str) -> dict[str, Any]:
+        return {
+            "status": "blocked",
+            "iso2": iso2,
+            "detail_code": "dataset_blocked_by_policy",
+        }
+
+    def is_iso2_allowed(self, iso2: str) -> bool:
+        return self._dataset_policy.allows(iso2)
 
     def get_or_init_global_lookup(self):
         if self._global_lookup is not None:
@@ -129,6 +145,8 @@ class CadisManager:
 
     def get_runtime_readiness(self, iso2: str) -> tuple[_RuntimeHandle | None, dict[str, Any]]:
         normalized_iso2 = iso2.strip().upper()
+        if not self.is_iso2_allowed(normalized_iso2):
+            return None, self._blocked_dataset_state(normalized_iso2)
         handle = self._runtime_handles.get(normalized_iso2)
         if handle is not None:
             return handle, dict(handle.dataset_state)
@@ -160,6 +178,11 @@ class CadisManager:
         from cadis.runtime import bootstrap_dataset
 
         normalized_iso2 = iso2.strip().upper()
+        if not self.is_iso2_allowed(normalized_iso2):
+            return {
+                "bootstrap_status": "failed",
+                "state": {"dataset": self._blocked_dataset_state(normalized_iso2)},
+            }
         cache_root = self._resolve_cache_root(cache_dir)
         install_state = install_dataset(
             iso2=normalized_iso2,

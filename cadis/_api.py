@@ -228,9 +228,12 @@ def reinstall(
 
 def info() -> InfoResponse:
     installed_iso2 = _installed_iso2_from_cache()
+    dataset_policy = get_manager().dataset_policy
     return {
         "schema_version": SCHEMA_VERSION,
         "version": VERSION,
         "supported_iso2": list(SUPPORTED_ISO2),
         "installed_iso2": installed_iso2,
+        "dataset_lockdown_enabled": dataset_policy.enabled,
+        "allowed_iso2": sorted(dataset_policy.allowed_iso2),
     }

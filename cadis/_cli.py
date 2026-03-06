@@ -41,6 +41,8 @@ def _print_info_human(payload: dict[str, Any]) -> None:
     version = payload.get("version")
     supported = payload.get("supported_iso2")
     installed = payload.get("installed_iso2")
+    lockdown_enabled = bool(payload.get("dataset_lockdown_enabled"))
+    allowed = payload.get("allowed_iso2")
 
     print(f"Cadis {version}" if isinstance(version, str) else "Cadis")
     print("")
@@ -59,6 +61,18 @@ def _print_info_human(payload: dict[str, Any]) -> None:
                 print(_format_iso2_line(iso2))
     else:
         print("- (none)")
+    print("")
+    print("Dataset Lockdown:")
+    print("- enabled" if lockdown_enabled else "- disabled")
+    if lockdown_enabled:
+        print("")
+        print("Allowed:")
+        if isinstance(allowed, list) and allowed:
+            for iso2 in allowed:
+                if isinstance(iso2, str) and iso2.strip():
+                    print(_format_iso2_line(iso2))
+        else:
+            print("- (none)")
 
 
 def _confirm(prompt: str) -> bool:
@@ -206,6 +220,11 @@ def _maybe_run_remediation(payload: dict[str, Any]) -> tuple[int, bool]:
 
     if dataset_status in {"missing", "invalid"} and iso2 and iso2 not in supported:
         print("Administrative dataset for this region is not supported in this version.")
+        return 1, False
+
+    if dataset_status == "blocked" and iso2:
+        label = _country_label(iso2)
+        print(f"Administrative dataset for {label} is blocked by Cadis dataset policy.")
         return 1, False
 
     if dataset_status == "missing" and iso2:
