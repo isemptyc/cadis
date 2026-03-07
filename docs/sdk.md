@@ -182,7 +182,7 @@ cadis lookup 35.153557004399545 133.48428546061976 --json
     "dataset": {
       "status": "ready",
       "iso2": "JP",
-      "dataset_dir": "/Users/isempty/Library/Caches/cadis/JP/jp.admin/v1.0.1"
+      "dataset_dir": "/path/to/cadis-cache/JP/jp.admin/v1.0.1"
     }
   },
   "result": {
@@ -326,6 +326,230 @@ Important distinction:
   "dataset_lockdown_enabled": True,
   "allowed_iso2": ["TW"]
 }
+```
+
+## Dataset Installation Lifecycle
+
+Cadis keeps lookup execution and dataset installation separate on purpose:
+
+- `lookup()` does not install or repair datasets.
+- `bootstrap()` installs or reuses a dataset so it becomes ready for lookup.
+- `reinstall()` is the explicit "replace or refresh" path.
+
+Typical flow:
+
+```python
+from cadis import CadisSDK
+
+sdk = CadisSDK()
+out = sdk.lookup(16.850848321319635, 121.15967381887826)
+meta = sdk.info()
+supported = set(meta["supported_iso2"])
+
+if out["execution"]["lookup_status"] == "failed":
+    ds = out.get("state", {}).get("dataset", {})
+    iso2 = ds.get("iso2")
+    if ds.get("status") == "missing" and iso2 in supported:
+        bootstrap_out = sdk.bootstrap(iso2, update_to_latest=True)
+```
+
+### `bootstrap()` vs `reinstall()`
+
+Use `bootstrap()` when you want Cadis to make a dataset available without forcing a replacement.
+
+Behavior:
+
+- validates the ISO2 input
+- checks dataset policy first
+- installs the dataset into cache if needed
+- may reuse an already cached dataset depending on `update_to_latest` and cache state
+- bootstraps the dataset so it is ready for runtime lookup
+
+Use `reinstall()` when you want to force a reinstall of the dataset for that ISO2.
+
+Behavior:
+
+- same as `bootstrap()`
+- always calls the force-reinstall path internally
+- useful when an installed dataset is `invalid` or you want a clean refresh
+
+Method signatures:
+
+```python
+sdk.bootstrap(
+    iso2: str,
+    *,
+    cache_dir: str | Path | None = None,
+    force_reinstall: bool = False,
+    update_to_latest: bool = False,
+)
+
+sdk.reinstall(
+    iso2: str,
+    *,
+    cache_dir: str | Path | None = None,
+    update_to_latest: bool = False,
+)
+```
+
+### `bootstrap()` / `reinstall()` Return Value
+
+Both methods return the same envelope shape:
+
+```python
+{
+  "engine": "cadis",
+  "version": "0.2.1",
+  "bootstrap_status": "ready" | "failed",
+  "state": {
+    "input": {...},    # invalid ISO2 input
+    "dataset": {...},  # dataset readiness outcome
+  },
+  "dataset": {...}     # install metadata, usually present on success
+}
+```
+
+Top-level fields:
+
+- `engine`: always `"cadis"`
+- `version`: Cadis package version
+- `bootstrap_status`:
+  - `ready`: dataset is ready for lookup after this call
+  - `failed`: Cadis could not make the dataset ready
+- `state`: operational status for the bootstrap attempt
+- `dataset`: installation metadata from the CDN/bootstrap layer
+
+### `state.dataset` During Bootstrap
+
+Typical statuses:
+
+- `ready`: dataset is installed and bootstrapped
+- `missing`: no dataset directory could be resolved after install
+- `invalid`: install or bootstrap completed, but the dataset is still unusable
+- `blocked`: dataset policy denied access for this ISO2
+
+Examples:
+
+Successful bootstrap:
+
+```python
+{
+  "engine": "cadis",
+  "version": "0.2.1",
+  "bootstrap_status": "ready",
+  "state": {
+    "dataset": {
+      "status": "ready",
+      "iso2": "JP",
+      "dataset_dir": "/path/to/cadis-cache/JP/jp.admin/v1.0.1"
+    }
+  },
+  "dataset": {
+    "country_iso2": "JP",
+    "dataset_id": "jp.admin",
+    "dataset_version": "v1.0.1",
+    "dataset_dir": "/path/to/cadis-cache/JP/jp.admin/v1.0.1",
+    "used_cached_dataset": True
+  }
+}
+```
+
+Blocked by policy:
+
+```python
+{
+  "engine": "cadis",
+  "version": "0.2.1",
+  "bootstrap_status": "failed",
+  "state": {
+    "dataset": {
+      "status": "blocked",
+      "iso2": "JP",
+      "detail_code": "dataset_blocked_by_policy"
+    }
+  }
+}
+```
+
+Invalid input:
+
+```python
+{
+  "engine": "cadis",
+  "version": "0.2.1",
+  "bootstrap_status": "failed",
+  "state": {
+    "input": {
+      "status": "invalid"
+    }
+  }
+}
+```
+
+### Dataset Path Assignment
+
+Cadis resolves the cache root in this order:
+
+1. `cache_dir=` argument passed to `bootstrap()` or `reinstall()`
+2. `CADIS_CACHE_DIR` environment variable
+3. platform default from `platformdirs`
+4. fallback path `~/.cache/cadis`
+
+If you do not pass `cache_dir`, Cadis uses the process default cache root.
+
+Example:
+
+```python
+sdk.bootstrap("JP", cache_dir="/data/cadis-cache")
+```
+
+This installs the dataset under a country/dataset/version layout:
+
+```text
+/data/cadis-cache/
+  JP/
+    jp.admin/
+      v1.0.1/
+        dataset_release_manifest.json
+        runtime_policy.json
+        ...
+```
+
+Important distinction:
+
+- `cache_dir` controls where installation happens for `bootstrap()` and `reinstall()`.
+- `lookup()` does not accept a `cache_dir` argument and uses the process-level default cache root.
+
+That means if you bootstrap into a custom location, lookup will only see that dataset if the running Cadis process resolves the same cache root. In practice, use one of these patterns:
+
+- pass a stable `CADIS_CACHE_DIR` for the whole process
+- bootstrap into the default cache location
+- avoid mixing multiple cache roots within the same SDK process unless you control process startup carefully
+
+### Installation Examples
+
+Install using default cache location:
+
+```python
+sdk.bootstrap("JP", update_to_latest=True)
+```
+
+Install into a custom cache root:
+
+```python
+sdk.bootstrap("JP", cache_dir="/srv/cadis-cache", update_to_latest=True)
+```
+
+Force a clean reinstall:
+
+```python
+sdk.reinstall("JP", update_to_latest=True)
+```
+
+Custom cache root plus reinstall:
+
+```python
+sdk.reinstall("JP", cache_dir="/srv/cadis-cache", update_to_latest=True)
 ```
 
 ## Explicit Remediation
