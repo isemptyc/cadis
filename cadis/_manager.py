@@ -5,11 +5,11 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 
 from ._cache import resolve_cache_dir
 from ._errors import normalize_reason
-from ._policy import DatasetPolicy, load_dataset_policy_from_env
+from ._policy import DatasetPolicy, load_dataset_policy_from_env, make_dataset_policy
 
 
 @dataclass
@@ -22,11 +22,19 @@ class _RuntimeHandle:
 class CadisManager:
     """Process-level manager for world + runtime orchestration."""
 
-    def __init__(self, *, dataset_policy: DatasetPolicy | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        dataset_policy: DatasetPolicy | None = None,
+        default_cache_dir: str | Path | None = None,
+    ) -> None:
         self._global_lookup = None
         self._runtime_handles: dict[str, _RuntimeHandle] = {}
         self._lock = threading.Lock()
         self._dataset_policy = dataset_policy or load_dataset_policy_from_env()
+        self._default_cache_dir = (
+            Path(default_cache_dir).expanduser() if default_cache_dir is not None else None
+        )
 
     def is_initialized(self) -> bool:
         return self._global_lookup is not None
@@ -69,9 +77,10 @@ class CadisManager:
     def _dataset_id_for_iso2(iso2: str) -> str:
         return f"{iso2.lower()}.admin"
 
-    @staticmethod
-    def _resolve_cache_root(cache_dir: str | Path | None = None) -> Path:
+    def _resolve_cache_root(self, cache_dir: str | Path | None = None) -> Path:
         if cache_dir is None:
+            if self._default_cache_dir is not None:
+                return self._default_cache_dir
             return resolve_cache_dir()
         return Path(cache_dir).expanduser()
 
@@ -139,11 +148,21 @@ class CadisManager:
             },
         )
 
-    def get_runtime_if_ready(self, iso2: str) -> _RuntimeHandle | None:
-        handle, _ = self.get_runtime_readiness(iso2)
+    def get_runtime_if_ready(
+        self,
+        iso2: str,
+        *,
+        cache_dir: str | Path | None = None,
+    ) -> _RuntimeHandle | None:
+        handle, _ = self.get_runtime_readiness(iso2, cache_dir=cache_dir)
         return handle
 
-    def get_runtime_readiness(self, iso2: str) -> tuple[_RuntimeHandle | None, dict[str, Any]]:
+    def get_runtime_readiness(
+        self,
+        iso2: str,
+        *,
+        cache_dir: str | Path | None = None,
+    ) -> tuple[_RuntimeHandle | None, dict[str, Any]]:
         normalized_iso2 = iso2.strip().upper()
         if not self.is_iso2_allowed(normalized_iso2):
             return None, self._blocked_dataset_state(normalized_iso2)
@@ -155,7 +174,7 @@ class CadisManager:
             handle = self._runtime_handles.get(normalized_iso2)
             if handle is not None:
                 return handle, dict(handle.dataset_state)
-            dataset_dir, state = self._find_local_ready_dataset(normalized_iso2)
+            dataset_dir, state = self._find_local_ready_dataset(normalized_iso2, cache_dir=cache_dir)
             if dataset_dir is None:
                 state_with_iso2 = dict(state)
                 state_with_iso2.setdefault("iso2", normalized_iso2)
@@ -220,8 +239,36 @@ class CadisManager:
         }
 
 
-_MANAGER = CadisManager()
+_MANAGERS: dict[tuple[str, tuple[str, ...]], CadisManager] = {}
+_MANAGERS_LOCK = threading.Lock()
 
 
-def get_manager() -> CadisManager:
-    return _MANAGER
+def get_manager(
+    *,
+    cache_dir: str | Path | None = None,
+    allowed_iso2: Iterable[str] | None = None,
+) -> CadisManager:
+    resolved_cache_dir = Path(cache_dir).expanduser() if cache_dir is not None else resolve_cache_dir()
+    if allowed_iso2 is None:
+        dataset_policy = load_dataset_policy_from_env()
+    else:
+        dataset_policy = make_dataset_policy(allowed_iso2)
+
+    key = (
+        str(resolved_cache_dir),
+        tuple(sorted(dataset_policy.allowed_iso2)),
+    )
+    manager = _MANAGERS.get(key)
+    if manager is not None:
+        return manager
+
+    with _MANAGERS_LOCK:
+        manager = _MANAGERS.get(key)
+        if manager is not None:
+            return manager
+        manager = CadisManager(
+            dataset_policy=dataset_policy,
+            default_cache_dir=resolved_cache_dir,
+        )
+        _MANAGERS[key] = manager
+        return manager

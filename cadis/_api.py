@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 from pathlib import Path
 
 from ._cache import resolve_cache_dir
@@ -22,8 +22,8 @@ VERSION = __version__
 SUPPORTED_ISO2 = ["JP", "TW"]
 
 
-def _installed_iso2_from_cache() -> list[str]:
-    path = resolve_cache_dir()
+def _installed_iso2_from_cache(cache_dir: str | Path | None = None) -> list[str]:
+    path = resolve_cache_dir() if cache_dir is None else Path(cache_dir).expanduser()
     if not path.exists() or not path.is_dir():
         return []
 
@@ -98,13 +98,19 @@ def _world_state_from_context(world_context: Any, *, world_status: str) -> World
     }
 
 
-def lookup(lat: float, lon: float) -> LookupResponse:
+def lookup(
+    lat: float,
+    lon: float,
+    *,
+    cache_dir: str | Path | None = None,
+    allowed_iso2: Iterable[str] | None = None,
+) -> LookupResponse:
     if not isinstance(lat, (float, int)) or not isinstance(lon, (float, int)):
         return _failed_output(state={"input": {"status": "invalid"}})
     if lat < -90 or lat > 90 or lon < -180 or lon > 180:
         return _failed_output(state={"input": {"status": "invalid"}})
 
-    manager = get_manager()
+    manager = get_manager(cache_dir=cache_dir, allowed_iso2=allowed_iso2)
     try:
         global_lookup = manager.get_or_init_global_lookup()
         world_result = global_lookup.lookup(float(lat), float(lon))
@@ -126,7 +132,7 @@ def lookup(lat: float, lon: float) -> LookupResponse:
         return _failed_output(state={"world": world_state})
 
     try:
-        runtime_handle, dataset_state = manager.get_runtime_readiness(iso2)
+        runtime_handle, dataset_state = manager.get_runtime_readiness(iso2, cache_dir=cache_dir)
     except Exception:
         return _failed_output(
             state={
@@ -174,6 +180,7 @@ def bootstrap(
     iso2: str,
     *,
     cache_dir: str | Path | None = None,
+    allowed_iso2: Iterable[str] | None = None,
     force_reinstall: bool = False,
     update_to_latest: bool = False,
     download_progress: Callable[[str, int, int | None], None] | None = None,
@@ -186,7 +193,7 @@ def bootstrap(
             "state": {"input": {"status": "invalid"}},
         }
 
-    manager = get_manager()
+    manager = get_manager(cache_dir=cache_dir, allowed_iso2=allowed_iso2)
     try:
         payload = manager.bootstrap_runtime(
             iso2,
@@ -214,21 +221,27 @@ def reinstall(
     iso2: str,
     *,
     cache_dir: str | Path | None = None,
+    allowed_iso2: Iterable[str] | None = None,
     update_to_latest: bool = False,
     download_progress: Callable[[str, int, int | None], None] | None = None,
 ) -> BootstrapResponse:
     return bootstrap(
         iso2,
         cache_dir=cache_dir,
+        allowed_iso2=allowed_iso2,
         force_reinstall=True,
         update_to_latest=update_to_latest,
         download_progress=download_progress,
     )
 
 
-def info() -> InfoResponse:
-    installed_iso2 = _installed_iso2_from_cache()
-    dataset_policy = get_manager().dataset_policy
+def info(
+    *,
+    cache_dir: str | Path | None = None,
+    allowed_iso2: Iterable[str] | None = None,
+) -> InfoResponse:
+    installed_iso2 = _installed_iso2_from_cache(cache_dir=cache_dir)
+    dataset_policy = get_manager(cache_dir=cache_dir, allowed_iso2=allowed_iso2).dataset_policy
     return {
         "schema_version": SCHEMA_VERSION,
         "version": VERSION,

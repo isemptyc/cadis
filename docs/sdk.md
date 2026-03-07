@@ -5,7 +5,10 @@
 ```python
 from cadis import CadisSDK
 
-sdk = CadisSDK()
+sdk = CadisSDK(
+    cache_dir="/path/to/cadis-cache",
+    allowed_iso2=["JP", "TW"],
+)
 out = sdk.lookup(25.0330, 121.5654)
 ```
 
@@ -14,7 +17,42 @@ out = sdk.lookup(25.0330, 121.5654)
 - `lookup()` is deterministic and side-effect free.
 - No prompt, no implicit bootstrap/reinstall.
 - Caller decides remediation by inspecting `execution` + `state`.
-- If `CADIS_ALLOWED_ISO2` is set, lookups outside that allowlist fail with `state.dataset.status == "blocked"`.
+- SDK instances can carry an explicit cache root and dataset allowlist.
+- Environment variables remain compatibility defaults when no explicit context is supplied.
+
+## SDK Context
+
+`CadisSDK` can be created with explicit runtime context:
+
+```python
+from cadis import CadisSDK
+
+sdk = CadisSDK(
+    cache_dir="/srv/genesis/cadis-cache",
+    allowed_iso2=["JP", "TW"],
+)
+```
+
+This context is used by:
+
+- `sdk.lookup(...)`
+- `sdk.info()`
+- `sdk.bootstrap(...)`
+- `sdk.reinstall(...)`
+
+You can also override the context per call:
+
+```python
+sdk.lookup(35.68, 139.76, cache_dir="/tmp/alternate-cache")
+sdk.info(allowed_iso2=["TW"])
+```
+
+Precedence rules:
+
+1. per-call arguments
+2. `CadisSDK(...)` constructor arguments
+3. environment defaults such as `CADIS_CACHE_DIR` and `CADIS_ALLOWED_ISO2`
+4. platform default cache resolution
 
 ## `lookup()` Return Value
 
@@ -23,7 +61,7 @@ out = sdk.lookup(25.0330, 121.5654)
 ```python
 {
   "engine": "cadis",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "execution": {
     "lookup_status": "ok" | "partial" | "failed"
   },
@@ -175,7 +213,7 @@ cadis lookup 35.153557004399545 133.48428546061976 --json
 ```python
 {
   "engine": "cadis",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "execution": {"lookup_status": "ok"},
   "state": {
     "world": {"status": "ok", "classification": "country", "iso2": "JP"},
@@ -224,7 +262,7 @@ World resolved to a non-country region:
 ```python
 {
   "engine": "cadis",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "execution": {"lookup_status": "failed"},
   "state": {
     "world": {
@@ -242,7 +280,7 @@ Invalid input:
 ```python
 {
   "engine": "cadis",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "execution": {"lookup_status": "failed"},
   "state": {
     "input": {"status": "invalid"}
@@ -256,7 +294,7 @@ Dataset missing:
 ```python
 {
   "engine": "cadis",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "execution": {"lookup_status": "failed"},
   "state": {
     "world": {"status": "ok", "classification": "country", "iso2": "PH"},
@@ -271,7 +309,7 @@ Dataset blocked by policy:
 ```python
 {
   "engine": "cadis",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "execution": {"lookup_status": "failed"},
   "state": {
     "world": {"status": "ok", "classification": "country", "iso2": "JP"},
@@ -287,12 +325,12 @@ Dataset blocked by policy:
 
 ## `info()` Return Value
 
-`info()` returns process and dataset inventory metadata:
+`info()` returns dataset inventory metadata for the active Cadis context:
 
 ```python
 {
   "schema_version": "1",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "supported_iso2": ["JP", "TW"],
   "installed_iso2": ["JP"],
   "dataset_lockdown_enabled": False,
@@ -320,7 +358,7 @@ Important distinction:
 ```python
 {
   "schema_version": "1",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "supported_iso2": ["JP", "TW"],
   "installed_iso2": ["JP", "TW"],
   "dataset_lockdown_enabled": True,
@@ -380,6 +418,7 @@ sdk.bootstrap(
     iso2: str,
     *,
     cache_dir: str | Path | None = None,
+    allowed_iso2: Iterable[str] | None = None,
     force_reinstall: bool = False,
     update_to_latest: bool = False,
 )
@@ -388,6 +427,7 @@ sdk.reinstall(
     iso2: str,
     *,
     cache_dir: str | Path | None = None,
+    allowed_iso2: Iterable[str] | None = None,
     update_to_latest: bool = False,
 )
 ```
@@ -399,7 +439,7 @@ Both methods return the same envelope shape:
 ```python
 {
   "engine": "cadis",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "bootstrap_status": "ready" | "failed",
   "state": {
     "input": {...},    # invalid ISO2 input
@@ -435,7 +475,7 @@ Successful bootstrap:
 ```python
 {
   "engine": "cadis",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "bootstrap_status": "ready",
   "state": {
     "dataset": {
@@ -459,7 +499,7 @@ Blocked by policy:
 ```python
 {
   "engine": "cadis",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "bootstrap_status": "failed",
   "state": {
     "dataset": {
@@ -476,7 +516,7 @@ Invalid input:
 ```python
 {
   "engine": "cadis",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "bootstrap_status": "failed",
   "state": {
     "input": {
@@ -490,17 +530,26 @@ Invalid input:
 
 Cadis resolves the cache root in this order:
 
-1. `cache_dir=` argument passed to `bootstrap()` or `reinstall()`
-2. `CADIS_CACHE_DIR` environment variable
-3. platform default from `platformdirs`
-4. fallback path `~/.cache/cadis`
+1. `cache_dir=` argument passed to `lookup()`, `info()`, `bootstrap()`, or `reinstall()`
+2. `CadisSDK(cache_dir=...)` constructor default
+3. `CADIS_CACHE_DIR` environment variable
+4. platform default from `platformdirs`
+5. fallback path `~/.cache/cadis`
 
-If you do not pass `cache_dir`, Cadis uses the process default cache root.
+Cadis resolves the dataset allowlist in this order:
+
+1. `allowed_iso2=` argument passed to `lookup()`, `info()`, `bootstrap()`, or `reinstall()`
+2. `CadisSDK(allowed_iso2=...)` constructor default
+3. `CADIS_ALLOWED_ISO2` environment variable
+4. no lockdown policy
+
+If you do not pass explicit context, Cadis uses the SDK-level or environment-level defaults.
 
 Example:
 
 ```python
-sdk.bootstrap("JP", cache_dir="/data/cadis-cache")
+sdk = CadisSDK(cache_dir="/data/cadis-cache")
+sdk.bootstrap("JP")
 ```
 
 This installs the dataset under a country/dataset/version layout:
@@ -517,27 +566,35 @@ This installs the dataset under a country/dataset/version layout:
 
 Important distinction:
 
-- `cache_dir` controls where installation happens for `bootstrap()` and `reinstall()`.
-- `lookup()` does not accept a `cache_dir` argument and uses the process-level default cache root.
+- `cache_dir` affects `lookup()`, `info()`, `bootstrap()`, and `reinstall()`.
+- `allowed_iso2` affects `lookup()`, `info()`, `bootstrap()`, and `reinstall()`.
+- runtime caching is isolated by context, so two SDK instances can safely use different cache roots in one process.
 
-That means if you bootstrap into a custom location, lookup will only see that dataset if the running Cadis process resolves the same cache root. In practice, use one of these patterns:
+That means a caller can safely create multiple isolated Cadis SDK contexts in one process. In practice, use one of these patterns:
 
-- pass a stable `CADIS_CACHE_DIR` for the whole process
-- bootstrap into the default cache location
-- avoid mixing multiple cache roots within the same SDK process unless you control process startup carefully
+- set a stable `cache_dir` on the SDK instance
+- use per-call overrides only when you explicitly want to switch context
+- keep environment variables as compatibility defaults rather than the primary control surface
 
 ### Installation Examples
 
-Install using default cache location:
+Install using SDK-scoped cache location:
 
 ```python
+sdk = CadisSDK(cache_dir="/srv/cadis-cache")
 sdk.bootstrap("JP", update_to_latest=True)
 ```
 
-Install into a custom cache root:
+Lookup from the same explicit cache root:
 
 ```python
-sdk.bootstrap("JP", cache_dir="/srv/cadis-cache", update_to_latest=True)
+sdk.lookup(35.153557004399545, 133.48428546061976)
+```
+
+Install into a per-call custom cache root:
+
+```python
+sdk.bootstrap("JP", cache_dir="/srv/another-cache", update_to_latest=True)
 ```
 
 Force a clean reinstall:
@@ -546,10 +603,14 @@ Force a clean reinstall:
 sdk.reinstall("JP", update_to_latest=True)
 ```
 
-Custom cache root plus reinstall:
+Create two isolated SDK contexts in one process:
 
 ```python
-sdk.reinstall("JP", cache_dir="/srv/cadis-cache", update_to_latest=True)
+sdk_default = CadisSDK(cache_dir="/srv/cache-a")
+sdk_locked = CadisSDK(cache_dir="/srv/cache-b", allowed_iso2=["TW"])
+
+print(sdk_default.info())
+print(sdk_locked.info())
 ```
 
 ## Explicit Remediation
