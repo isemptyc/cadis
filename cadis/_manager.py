@@ -50,6 +50,59 @@ class CadisManager:
             "detail_code": "dataset_blocked_by_policy",
         }
 
+    def _invalid_dataset_state(
+        self,
+        iso2: str,
+        *,
+        detail_code: str,
+        detail: str,
+        dataset_dir: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        state: dict[str, Any] = {
+            "status": "invalid",
+            "iso2": iso2,
+            "detail_code": detail_code,
+            "detail": detail,
+        }
+        if dataset_dir:
+            state["dataset_dir"] = dataset_dir
+        if details:
+            state["details"] = details
+        return state
+
+    @staticmethod
+    def _classify_install_failure(exc: Exception) -> str:
+        message = str(exc).lower()
+        if "http error" in message or "urlopen error" in message or "timed out" in message:
+            return "download_failed"
+        if "dataset_manifest" in message or "release manifest" in message or "manifest" in message:
+            return "release_manifest_invalid"
+        if "missing required files" in message or "missing after bootstrap download" in message:
+            return "dataset_dir_incomplete"
+        if "runtime" in message and "supported" in message:
+            return "release_runtime_incompatible"
+        return "install_failed"
+
+    @staticmethod
+    def _augment_dataset_state(
+        state: dict[str, Any],
+        *,
+        iso2: str,
+        dataset_dir: str | None = None,
+        fallback_detail_code: str | None = None,
+        fallback_detail: str | None = None,
+    ) -> dict[str, Any]:
+        out = dict(state)
+        out.setdefault("iso2", iso2)
+        if dataset_dir:
+            out.setdefault("dataset_dir", dataset_dir)
+        if fallback_detail_code:
+            out.setdefault("detail_code", fallback_detail_code)
+        if fallback_detail:
+            out.setdefault("detail", fallback_detail)
+        return out
+
     def is_iso2_allowed(self, iso2: str) -> bool:
         return self._dataset_policy.allows(iso2)
 
@@ -203,23 +256,62 @@ class CadisManager:
                 "state": {"dataset": self._blocked_dataset_state(normalized_iso2)},
             }
         cache_root = self._resolve_cache_root(cache_dir)
-        install_state = install_dataset(
-            iso2=normalized_iso2,
-            cache_root=cache_root,
-            update_to_latest=update_to_latest,
-            force_reinstall=force_reinstall,
-            download_progress=download_progress,
-        )
+        try:
+            install_state = install_dataset(
+                iso2=normalized_iso2,
+                cache_root=cache_root,
+                update_to_latest=update_to_latest,
+                force_reinstall=force_reinstall,
+                download_progress=download_progress,
+            )
+        except Exception as exc:
+            detail_code = self._classify_install_failure(exc)
+            return {
+                "bootstrap_status": "failed",
+                "state": {
+                    "dataset": self._invalid_dataset_state(
+                        normalized_iso2,
+                        detail_code=detail_code,
+                        detail=str(exc),
+                        details={
+                            "exception_type": exc.__class__.__name__,
+                            "cache_dir": str(cache_root),
+                        },
+                    )
+                },
+            }
         dataset_dir = install_state.get("dataset_dir")
         if not isinstance(dataset_dir, str) or not dataset_dir.strip():
-            return {"bootstrap_status": "failed", "state": {"dataset": {"status": "missing"}}}
+            return {
+                "bootstrap_status": "failed",
+                "state": {
+                    "dataset": {
+                        "status": "missing",
+                        "iso2": normalized_iso2,
+                        "detail_code": "install_missing_dataset_dir",
+                        "detail": "Dataset install completed without a dataset_dir.",
+                    }
+                },
+            }
 
         bootstrap_state = bootstrap_dataset(dataset_dir)
         status = bootstrap_state.get("bootstrap_status")
         if status != "ready":
+            raw_state = bootstrap_state.get("state", {"dataset": {"status": "invalid"}})
+            dataset_state = raw_state.get("dataset", {})
+            if not isinstance(dataset_state, dict):
+                dataset_state = {"status": "invalid"}
             return {
                 "bootstrap_status": "failed",
-                "state": bootstrap_state.get("state", {"dataset": {"status": "invalid"}}),
+                "state": {
+                    "dataset": self._augment_dataset_state(
+                        dataset_state,
+                        iso2=normalized_iso2,
+                        dataset_dir=dataset_dir,
+                        fallback_detail_code="bootstrap_failed",
+                        fallback_detail="Dataset bootstrap did not produce a ready runtime.",
+                    )
+                },
             }
 
         handle = self._create_runtime_handle_from_dataset_dir(normalized_iso2, dataset_dir)

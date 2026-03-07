@@ -207,7 +207,17 @@ def bootstrap(
             "engine": "cadis",
             "version": VERSION,
             "bootstrap_status": "failed",
-            "state": {"dataset": {"status": "invalid"}},
+            "state": {
+                "dataset": {
+                    "status": "invalid",
+                    "iso2": iso2.strip().upper(),
+                    "detail_code": "bootstrap_runtime_exception",
+                    "detail": str(exc),
+                    "details": {
+                        "exception_type": exc.__class__.__name__,
+                    },
+                }
+            },
         }
 
     return {

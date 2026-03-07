@@ -29,6 +29,8 @@ class DatasetState(TypedDict, total=False):
     iso2: str
     dataset_dir: str
     detail_code: str
+    detail: str
+    details: dict[str, object]
 
 
 class LookupState(TypedDict, total=False):
