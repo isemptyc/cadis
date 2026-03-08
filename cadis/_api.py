@@ -8,18 +8,92 @@ from pathlib import Path
 
 from ._cache import resolve_cache_dir
 from ._manager import get_manager
-from .types import (
-    BootstrapResponse,
-    InfoResponse,
-    LookupResponse,
-    LookupState,
-    WorldState,
-)
+from .types import BootstrapResponse, ExecutionOutcome, InfoResponse, LookupResponse, LookupState, WorldState
 from .version import __version__
 
 SCHEMA_VERSION = "1"
 VERSION = __version__
 SUPPORTED_ISO2 = ["JP", "TW"]
+
+
+def _infer_resolution_state(
+    *,
+    lookup_status: str,
+    state: LookupState,
+) -> str:
+    if lookup_status == "ok":
+        return "resolved"
+    if lookup_status == "partial":
+        return "partial"
+
+    input_state = state.get("input")
+    if isinstance(input_state, dict) and input_state.get("status") == "invalid":
+        return "invalid_input"
+
+    dataset_state = state.get("dataset")
+    if isinstance(dataset_state, dict):
+        dataset_status = dataset_state.get("status")
+        if dataset_status == "blocked":
+            return "blocked_by_policy"
+        if dataset_status in {"missing", "invalid"}:
+            return "remediable_capability_gap"
+        if dataset_status == "ready":
+            return "unresolved_country"
+
+    world_state = state.get("world")
+    if isinstance(world_state, dict):
+        if world_state.get("status") == "failed":
+            return "engine_failure"
+        classification = world_state.get("classification")
+        if isinstance(classification, str) and classification and classification != "country":
+            return "terminal_non_country"
+
+    return "engine_failure"
+
+
+def _infer_capability_detail(*, lookup_status: str, state: LookupState) -> str | None:
+    if lookup_status == "ok":
+        return None
+    if lookup_status == "partial":
+        return None
+
+    input_state = state.get("input")
+    if isinstance(input_state, dict) and input_state.get("status") == "invalid":
+        return "input_invalid"
+
+    dataset_state = state.get("dataset")
+    if isinstance(dataset_state, dict):
+        dataset_status = dataset_state.get("status")
+        iso2 = dataset_state.get("iso2")
+        if dataset_status == "blocked":
+            return "dataset_blocked_by_policy"
+        if dataset_status == "invalid":
+            return "dataset_invalid"
+        if dataset_status == "ready":
+            return "dataset_ready_unresolved"
+        if dataset_status == "missing":
+            if isinstance(iso2, str) and iso2.upper() in SUPPORTED_ISO2:
+                return "supported_dataset_missing"
+            return "unsupported_country"
+
+    world_state = state.get("world")
+    if isinstance(world_state, dict):
+        classification = world_state.get("classification")
+        if isinstance(classification, str) and classification and classification != "country":
+            return "non_country_world_classification"
+
+    return None
+
+
+def _execution_outcome(*, lookup_status: str, state: LookupState) -> ExecutionOutcome:
+    outcome: ExecutionOutcome = {
+        "lookup_status": lookup_status,  # type: ignore[typeddict-item]
+        "resolution_state": _infer_resolution_state(lookup_status=lookup_status, state=state),  # type: ignore[typeddict-item]
+    }
+    capability_detail = _infer_capability_detail(lookup_status=lookup_status, state=state)
+    if capability_detail is not None:
+        outcome["capability_detail"] = capability_detail  # type: ignore[typeddict-item]
+    return outcome
 
 
 def _installed_iso2_from_cache(cache_dir: str | Path | None = None) -> list[str]:
@@ -43,7 +117,7 @@ def _failed_output(
     return {
         "engine": "cadis",
         "version": VERSION,
-        "execution": {"lookup_status": "failed"},
+        "execution": _execution_outcome(lookup_status="failed", state=state),
         "state": state,
         "result": result,
     }
@@ -167,7 +241,13 @@ def lookup(
     return {
         "engine": "cadis",
         "version": VERSION,
-        "execution": {"lookup_status": runtime_status},
+        "execution": _execution_outcome(
+            lookup_status=runtime_status,
+            state={
+                "world": world_state,
+                "dataset": runtime_handle.dataset_state,
+            },
+        ),
         "state": {
             "world": world_state,
             "dataset": runtime_handle.dataset_state,

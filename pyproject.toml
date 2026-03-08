@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cadis"
-version = "0.3.0"
+version = "0.3.1"
 description = "Lat/Lon to administrative hierarchy lookup with managed datasets."
 readme = "README.md"
 requires-python = ">=3.9"
-license = "MIT"
+license = { text = "MIT" }
 authors = [{ name = "Cadis" }]
 dependencies = [
   "platformdirs>=4.0",

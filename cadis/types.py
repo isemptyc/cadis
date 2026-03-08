@@ -5,12 +5,33 @@ from __future__ import annotations
 from typing import Literal, TypedDict
 
 LookupStatus = Literal["ok", "partial", "failed"]
+ResolutionState = Literal[
+    "resolved",
+    "partial",
+    "remediable_capability_gap",
+    "blocked_by_policy",
+    "terminal_non_country",
+    "invalid_input",
+    "engine_failure",
+    "unresolved_country",
+]
+CapabilityDetail = Literal[
+    "supported_dataset_missing",
+    "unsupported_country",
+    "dataset_invalid",
+    "dataset_blocked_by_policy",
+    "dataset_ready_unresolved",
+    "input_invalid",
+    "non_country_world_classification",
+]
 BootstrapStatus = Literal["ready", "failed"]
 StateStatus = Literal["ok", "failed", "missing", "invalid", "ready", "skipped", "blocked"]
 
 
-class ExecutionOutcome(TypedDict):
+class ExecutionOutcome(TypedDict, total=False):
     lookup_status: LookupStatus
+    resolution_state: ResolutionState
+    capability_detail: CapabilityDetail
 
 
 class InputState(TypedDict):

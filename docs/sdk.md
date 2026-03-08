@@ -61,9 +61,28 @@ Precedence rules:
 ```python
 {
   "engine": "cadis",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "execution": {
-    "lookup_status": "ok" | "partial" | "failed"
+    "lookup_status": "ok" | "partial" | "failed",
+    "resolution_state": (
+      "resolved"
+      | "partial"
+      | "remediable_capability_gap"
+      | "blocked_by_policy"
+      | "terminal_non_country"
+      | "invalid_input"
+      | "engine_failure"
+      | "unresolved_country"
+    ),
+    "capability_detail": (
+      "supported_dataset_missing"
+      | "unsupported_country"
+      | "dataset_invalid"
+      | "dataset_blocked_by_policy"
+      | "dataset_ready_unresolved"
+      | "input_invalid"
+      | "non_country_world_classification"
+    ) | null
   },
   "state": {
     "input": {...},    # present only for invalid input
@@ -82,6 +101,24 @@ Precedence rules:
   - `ok`: lookup completed successfully.
   - `partial`: lookup completed but the administrative hierarchy is incomplete.
   - `failed`: Cadis could not produce an administrative result.
+- `execution.resolution_state`:
+  - `resolved`: Cadis produced a successful resolved administrative result.
+  - `partial`: Cadis produced a meaningful but incomplete administrative result.
+  - `remediable_capability_gap`: lookup failed because current capability is insufficient but may improve with dataset installation or repair.
+  - `blocked_by_policy`: lookup was denied by Cadis dataset policy.
+  - `terminal_non_country`: world resolution succeeded but the point is not in a country dataset scope.
+  - `invalid_input`: caller supplied invalid coordinates or non-numeric values.
+  - `engine_failure`: Cadis failed before it could produce a stable semantic outcome.
+  - `unresolved_country`: Cadis reached a country dataset context but did not produce an administrative result.
+- `execution.capability_detail`:
+  - optional narrower detail for hosts that need to distinguish specific capability cases without separately diffing `info()`
+  - `supported_dataset_missing`: the country is supported by this Cadis build, but its dataset is not currently available
+  - `unsupported_country`: world resolution identified a country, but this Cadis build does not currently support that ISO2 dataset
+  - `dataset_invalid`: a dataset exists for the ISO2 but is not usable
+  - `dataset_blocked_by_policy`: dataset access is denied by Cadis dataset policy
+  - `dataset_ready_unresolved`: a ready dataset was selected but runtime still did not produce an administrative result
+  - `input_invalid`: invalid caller input
+  - `non_country_world_classification`: world resolution ended in a non-country classification
 - `state`: operational state that explains why lookup succeeded or failed.
 - `result`: administrative lookup payload on success, otherwise usually `None`.
 
@@ -213,8 +250,8 @@ cadis lookup 35.153557004399545 133.48428546061976 --json
 ```python
 {
   "engine": "cadis",
-  "version": "0.3.0",
-  "execution": {"lookup_status": "ok"},
+  "version": "0.3.1",
+  "execution": {"lookup_status": "ok", "resolution_state": "resolved"},
   "state": {
     "world": {"status": "ok", "classification": "country", "iso2": "JP"},
     "dataset": {
@@ -262,8 +299,12 @@ World resolved to a non-country region:
 ```python
 {
   "engine": "cadis",
-  "version": "0.3.0",
-  "execution": {"lookup_status": "failed"},
+  "version": "0.3.1",
+  "execution": {
+    "lookup_status": "failed",
+    "resolution_state": "terminal_non_country",
+    "capability_detail": "non_country_world_classification"
+  },
   "state": {
     "world": {
       "status": "ok",
@@ -280,8 +321,12 @@ Invalid input:
 ```python
 {
   "engine": "cadis",
-  "version": "0.3.0",
-  "execution": {"lookup_status": "failed"},
+  "version": "0.3.1",
+  "execution": {
+    "lookup_status": "failed",
+    "resolution_state": "invalid_input",
+    "capability_detail": "input_invalid"
+  },
   "state": {
     "input": {"status": "invalid"}
   },
@@ -294,8 +339,12 @@ Dataset missing:
 ```python
 {
   "engine": "cadis",
-  "version": "0.3.0",
-  "execution": {"lookup_status": "failed"},
+  "version": "0.3.1",
+  "execution": {
+    "lookup_status": "failed",
+    "resolution_state": "remediable_capability_gap",
+    "capability_detail": "unsupported_country"
+  },
   "state": {
     "world": {"status": "ok", "classification": "country", "iso2": "PH"},
     "dataset": {"status": "missing", "iso2": "PH"}
@@ -309,8 +358,12 @@ Dataset blocked by policy:
 ```python
 {
   "engine": "cadis",
-  "version": "0.3.0",
-  "execution": {"lookup_status": "failed"},
+  "version": "0.3.1",
+  "execution": {
+    "lookup_status": "failed",
+    "resolution_state": "blocked_by_policy",
+    "capability_detail": "dataset_blocked_by_policy"
+  },
   "state": {
     "world": {"status": "ok", "classification": "country", "iso2": "JP"},
     "dataset": {
