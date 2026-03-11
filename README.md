@@ -74,10 +74,11 @@ Cadis does not interpret ISO codes as political statements or sovereignty declar
 
 ## Supported ISO 3166-1 Entities
 
-| ISO2 | Name   | Dataset ID | Package Size (tar.gz) | Unpacked Size | Release Date (UTC) |
-|:-----|:-------|:-----------|----------------------:|--------------:|-------------------:|
-| TW   | Taiwan | tw.admin   | 1.8 MB                | 2.0 MB        | 2026-02-28         |
-| JP   | Japan  | jp.admin   | 20.4 MB               | 21.3 MB       | 2026-03-05         |
+| ISO2 | Name             | Dataset ID | Package Size (tar.gz) | Unpacked Size | Release Date (UTC) |
+|:-----|:---------------- |:-----------|----------------------:|--------------:|-------------------:|
+| TW   | Taiwan           | tw.admin   | 1.8 MB                | 2.0 MB        | 2026-02-28         |
+| JP   | Japan            | jp.admin   | 20.4 MB               | 21.3 MB       | 2026-03-05         |
+| GB   | United Kingdom   | gb.admin   | 4.8 MB                | 5.1 MB        | 2026-03-11         |
 
 Additional ISO 3166-1 entity datasets will be published as they become available.
 
