@@ -61,7 +61,7 @@ Precedence rules:
 ```python
 {
   "engine": "cadis",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "execution": {
     "lookup_status": "ok" | "partial" | "failed",
     "resolution_state": (
@@ -250,7 +250,7 @@ cadis lookup 35.153557004399545 133.48428546061976 --json
 ```python
 {
   "engine": "cadis",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "execution": {"lookup_status": "ok", "resolution_state": "resolved"},
   "state": {
     "world": {"status": "ok", "classification": "country", "iso2": "JP"},
@@ -299,7 +299,7 @@ World resolved to a non-country region:
 ```python
 {
   "engine": "cadis",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "execution": {
     "lookup_status": "failed",
     "resolution_state": "terminal_non_country",
@@ -321,7 +321,7 @@ Invalid input:
 ```python
 {
   "engine": "cadis",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "execution": {
     "lookup_status": "failed",
     "resolution_state": "invalid_input",
@@ -339,7 +339,7 @@ Dataset missing:
 ```python
 {
   "engine": "cadis",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "execution": {
     "lookup_status": "failed",
     "resolution_state": "remediable_capability_gap",
@@ -358,7 +358,7 @@ Dataset blocked by policy:
 ```python
 {
   "engine": "cadis",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "execution": {
     "lookup_status": "failed",
     "resolution_state": "blocked_by_policy",
