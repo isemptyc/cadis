@@ -159,6 +159,14 @@ def _summarize_result(payload: dict[str, Any]) -> str | None:
     if country_name:
         parts.append(country_name)
 
+    source = result.get("source")
+    if source == "offshore":
+        if country_name:
+            parts.append("Offshore")
+        else:
+            parts.append("Offshore")
+        return " / ".join(parts)
+
     hierarchy = result.get("admin_hierarchy")
     if isinstance(hierarchy, list):
         for node in hierarchy:

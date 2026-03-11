@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Callable, Iterable
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, Callable, Iterable
 
 from ._cache import resolve_cache_dir
 from ._manager import get_manager
@@ -172,6 +173,70 @@ def _world_state_from_context(world_context: Any, *, world_status: str) -> World
     }
 
 
+def _ready_runtime_handles_from_cache(
+    manager: Any,
+    *,
+    cache_dir: str | Path | None = None,
+) -> list[tuple[str, Any]]:
+    handles: list[tuple[str, Any]] = []
+    for iso2 in _installed_iso2_from_cache(cache_dir=cache_dir):
+        runtime_handle, dataset_state = manager.get_runtime_readiness(iso2, cache_dir=cache_dir)
+        if runtime_handle is None:
+            continue
+        if not isinstance(dataset_state, dict) or dataset_state.get("status") != "ready":
+            continue
+        handles.append((iso2, runtime_handle))
+    return handles
+
+
+def _runtime_offshore_distance_km(runtime_handle: Any, *, lat: float, lon: float) -> float | None:
+    runtime = getattr(runtime_handle, "runtime", None)
+    pipeline = getattr(runtime, "_pipeline", None)
+    if pipeline is None:
+        return None
+
+    geometry_index = getattr(pipeline, "geometry_index", None)
+    policy = getattr(pipeline, "policy", None)
+    if geometry_index is None or policy is None:
+        return None
+    if not geometry_index.has_country_scope_geometry():
+        return None
+
+    offshore_km = getattr(policy, "offshore_max_distance_km", None)
+    if offshore_km is None:
+        return None
+
+    pt = SimpleNamespace(x=float(lon), y=float(lat))
+    return float(geometry_index.distance_km_to_country_scope(pt))
+
+
+def _retry_open_sea_with_installed_runtime(
+    *,
+    manager: Any,
+    lat: float,
+    lon: float,
+    cache_dir: str | Path | None = None,
+) -> tuple[str, Any] | None:
+    nearest: tuple[float, str, Any] | None = None
+    for iso2, runtime_handle in _ready_runtime_handles_from_cache(manager, cache_dir=cache_dir):
+        distance_km = _runtime_offshore_distance_km(runtime_handle, lat=lat, lon=lon)
+        if distance_km is None:
+            continue
+
+        pipeline = getattr(getattr(runtime_handle, "runtime", None), "_pipeline", None)
+        policy = getattr(pipeline, "policy", None)
+        offshore_km = getattr(policy, "offshore_max_distance_km", None)
+        if offshore_km is None or distance_km > float(offshore_km):
+            continue
+
+        if nearest is None or distance_km < nearest[0]:
+            nearest = (distance_km, iso2, runtime_handle)
+
+    if nearest is None:
+        return None
+    return nearest[1], nearest[2]
+
+
 def lookup(
     lat: float,
     lon: float,
@@ -202,6 +267,20 @@ def lookup(
         return _failed_output(state={"world": world_state})
 
     iso2 = _extract_iso2(world_context)
+    if iso2 is None and world_state.get("classification") == "open_sea":
+        retried = _retry_open_sea_with_installed_runtime(
+            manager=manager,
+            lat=float(lat),
+            lon=float(lon),
+            cache_dir=cache_dir,
+        )
+        if retried is not None:
+            iso2, _ = retried
+            world_state = {
+                "status": "ok",
+                "classification": "country",
+                "iso2": iso2,
+            }
     if iso2 is None:
         return _failed_output(state={"world": world_state})
 
