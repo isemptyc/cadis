@@ -14,6 +14,18 @@ It orchestrates:
 pip install cadis
 ```
 
+## Quick Start (CLI)
+
+```bash
+cadis lookup 41.8785708032352 12.505896501941912
+```
+
+Typical flow:
+
+- If the country dataset is already installed, Cadis prints `Region: ...` immediately.
+- If the dataset is missing but supported, Cadis offers to download it and retries the lookup after install.
+- Sea and offshore results are shown directly in human-readable form.
+
 ## Quick Start (SDK)
 
 ```python
