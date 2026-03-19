@@ -18,7 +18,6 @@ pip install cadis
 
 ```bash
 cadis lookup 41.8785708032352 12.505896501941912
-cadis prepare --iso2 TW --output-dir /path/to/dataset
 ```
 
 Typical flow:
