@@ -51,6 +51,7 @@ class CadisSDK:
         *,
         cache_dir: str | Path | None = None,
         allowed_iso2: Iterable[str] | None = None,
+        dataset_version: str | None = None,
         force_reinstall: bool = False,
         update_to_latest: bool = False,
     ) -> BootstrapResponse:
@@ -58,6 +59,7 @@ class CadisSDK:
             iso2,
             cache_dir=self._cache_dir_or_default(cache_dir),
             allowed_iso2=self._allowed_iso2_or_default(allowed_iso2),
+            dataset_version=dataset_version,
             force_reinstall=force_reinstall,
             update_to_latest=update_to_latest,
         )
@@ -68,12 +70,14 @@ class CadisSDK:
         *,
         cache_dir: str | Path | None = None,
         allowed_iso2: Iterable[str] | None = None,
+        dataset_version: str | None = None,
         update_to_latest: bool = False,
     ) -> BootstrapResponse:
         return reinstall(
             iso2,
             cache_dir=self._cache_dir_or_default(cache_dir),
             allowed_iso2=self._allowed_iso2_or_default(allowed_iso2),
+            dataset_version=dataset_version,
             update_to_latest=update_to_latest,
         )
 

@@ -340,6 +340,7 @@ def bootstrap(
     *,
     cache_dir: str | Path | None = None,
     allowed_iso2: Iterable[str] | None = None,
+    dataset_version: str | None = None,
     force_reinstall: bool = False,
     update_to_latest: bool = False,
     download_progress: Callable[[str, int, int | None], None] | None = None,
@@ -357,11 +358,12 @@ def bootstrap(
         payload = manager.bootstrap_runtime(
             iso2,
             cache_dir=cache_dir,
+            dataset_version=dataset_version,
             force_reinstall=force_reinstall,
             update_to_latest=update_to_latest,
             download_progress=download_progress,
         )
-    except Exception:
+    except Exception as exc:
         return {
             "engine": "cadis",
             "version": VERSION,
@@ -391,6 +393,7 @@ def reinstall(
     *,
     cache_dir: str | Path | None = None,
     allowed_iso2: Iterable[str] | None = None,
+    dataset_version: str | None = None,
     update_to_latest: bool = False,
     download_progress: Callable[[str, int, int | None], None] | None = None,
 ) -> BootstrapResponse:
@@ -398,6 +401,7 @@ def reinstall(
         iso2,
         cache_dir=cache_dir,
         allowed_iso2=allowed_iso2,
+        dataset_version=dataset_version,
         force_reinstall=True,
         update_to_latest=update_to_latest,
         download_progress=download_progress,

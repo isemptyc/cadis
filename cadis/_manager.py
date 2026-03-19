@@ -242,6 +242,7 @@ class CadisManager:
         iso2: str,
         *,
         cache_dir: str | Path | None = None,
+        dataset_version: str | None = None,
         force_reinstall: bool = False,
         update_to_latest: bool = False,
         download_progress: Callable[[str, int, int | None], None] | None = None,
@@ -261,6 +262,7 @@ class CadisManager:
                 iso2=normalized_iso2,
                 cache_root=cache_root,
                 update_to_latest=update_to_latest,
+                dataset_version=dataset_version,
                 force_reinstall=force_reinstall,
                 download_progress=download_progress,
             )

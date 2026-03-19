@@ -7,6 +7,7 @@ import json
 import os
 from typing import Any, Callable, Sequence
 
+from . import bootstrap as api_bootstrap
 from . import info as api_info
 from . import lookup as api_lookup
 from . import reinstall as api_reinstall
@@ -24,6 +25,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
     info_parser = subparsers.add_parser("info")
     info_parser.add_argument("--json", action="store_true", dest="as_json")
+
+    prepare_parser = subparsers.add_parser("prepare")
+    prepare_parser.add_argument("--iso2", required=True)
+    prepare_parser.add_argument("--dataset-version")
+    prepare_parser.add_argument("--output-dir", required=True)
     return parser
 
 
@@ -106,7 +112,6 @@ def _render_download_progress() -> tuple[Callable[[str, int, int | None], None],
             print()
 
     return on_progress, finish
-
 
 def _supported_iso2() -> set[str]:
     payload = api_info()
@@ -321,6 +326,48 @@ def main(argv: Sequence[str] | None = None) -> int:
             _print_info_human(payload)
             return 0
         _print_json(payload)
+        return 0
+
+    if args.command == "prepare":
+        progress, finish_progress = _render_download_progress()
+        try:
+            prepared = api_bootstrap(
+                iso2=args.iso2,
+                cache_dir=args.output_dir,
+                dataset_version=args.dataset_version,
+                update_to_latest=args.dataset_version is None,
+                download_progress=progress,
+            )
+        finally:
+            finish_progress()
+
+        if not isinstance(prepared, dict) or prepared.get("bootstrap_status") != "ready":
+            detail = None
+            state = prepared.get("state") if isinstance(prepared, dict) else None
+            dataset_state = state.get("dataset") if isinstance(state, dict) else None
+            if isinstance(dataset_state, dict):
+                raw_detail = dataset_state.get("detail")
+                if isinstance(raw_detail, str) and raw_detail.strip():
+                    detail = raw_detail.strip()
+                else:
+                    raw_code = dataset_state.get("detail_code")
+                    if isinstance(raw_code, str) and raw_code.strip():
+                        detail = raw_code.strip()
+            if detail:
+                print(f"Prepare failed: {detail}")
+            else:
+                print("Prepare failed.")
+            return 1
+
+        dataset = prepared.get("dataset")
+        dataset_dir = dataset.get("dataset_dir") if isinstance(dataset, dict) else None
+        dataset_version = dataset.get("dataset_version") if isinstance(dataset, dict) else None
+        iso2 = str(args.iso2).upper()
+        print(f"Prepared dataset for {iso2} under cache root {args.output_dir}")
+        if isinstance(dataset_dir, str) and dataset_dir.strip():
+            print(f"Dataset dir: {dataset_dir}")
+        if isinstance(dataset_version, str) and dataset_version.strip():
+            print(f"Dataset version: {dataset_version}")
         return 0
 
     payload = api_lookup(args.lat, args.lon)
