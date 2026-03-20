@@ -42,6 +42,20 @@ This manifest is the default approved release set for production. It pins:
 
 - one Cadis package version
 - one dataset version for each supported ISO2 included in the release set
+- the upstream dataset manifest source and source generation timestamp used to produce the snapshot
+
+Cadis also provides a helper to refresh this file from the upstream dataset manifest:
+
+```bash
+python scripts/update_stable_release_manifest.py
+```
+
+The intended usage is:
+
+- fetch the upstream `dataset_manifest.json`
+- snapshot the currently published latest version for each Cadis-supported ISO2
+- write source timestamps into `releases/stable.json`
+- review and commit the result explicitly
 
 `stable` is not the same as `latest`:
 

@@ -44,6 +44,7 @@ print(out["execution"]["lookup_status"])
 - Deployment guide: [`docs/deployment.md`](docs/deployment.md)
 - CI/CD examples: [`docs/cicd-examples.md`](docs/cicd-examples.md)
 - Stable release manifest: [`releases/stable.json`](releases/stable.json)
+- Stable manifest updater: [`scripts/update_stable_release_manifest.py`](scripts/update_stable_release_manifest.py)
 
 ## Core APIs
 
