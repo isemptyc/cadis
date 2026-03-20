@@ -1,0 +1,14 @@
+{
+  "profile": "cadis.deployment.release",
+  "schema_version": 1,
+  "release_name": "stable",
+  "release_channel": "production",
+  "cadis_version": "0.3.6",
+  "datasets": {
+    "TW": "v1.0.3",
+    "JP": "v1.0.4",
+    "GB": "v1.0.2",
+    "IT": "v1.0.2",
+    "KR": "v1.0.1"
+  }
+}

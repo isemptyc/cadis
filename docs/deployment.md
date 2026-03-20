@@ -29,6 +29,26 @@ The recommended production rule is:
 4. Deploy code and prepared datasets together.
 5. Do not depend on `latest` resolution in production.
 
+## Official Stable Manifest
+
+Cadis should publish a repository-tracked pinned release manifest for production use.
+
+The default production manifest is:
+
+- [releases/stable.json](/Users/isempty/Projects/my_cadis/cadis/releases/stable.json)
+
+This manifest is the default approved release set for production. It pins:
+
+- one Cadis package version
+- one dataset version for each supported ISO2 included in the release set
+
+`stable` is not the same as `latest`:
+
+- `latest` means most recently published dataset release
+- `stable` means explicitly reviewed and approved for production deployment
+
+Only an explicit promotion should change `stable`.
+
 ## Deployment Modes
 
 ### Local Development
@@ -63,15 +83,20 @@ pip install cadis==0.3.6
 
 ### Step 2: Define the dataset release set
 
-Create a deployment manifest in your build system or application repository, for example:
+Create or adopt a deployment manifest in your build system or application repository. Cadis ships a repository-tracked default stable manifest:
 
 ```json
 {
+  "profile": "cadis.deployment.release",
+  "schema_version": 1,
+  "release_name": "stable",
   "cadis_version": "0.3.6",
   "datasets": {
     "TW": "v1.0.3",
     "JP": "v1.0.4",
-    "GB": "v1.0.2"
+    "GB": "v1.0.2",
+    "IT": "v1.0.2",
+    "KR": "v1.0.1"
   }
 }
 ```
@@ -83,9 +108,7 @@ This file is the authoritative definition of the deployment.
 Use a dedicated cache root and pin each dataset version:
 
 ```bash
-cadis prepare --iso2 TW --dataset-version v1.0.3 --output-dir /build/cadis-cache
-cadis prepare --iso2 JP --dataset-version v1.0.4 --output-dir /build/cadis-cache
-cadis prepare --iso2 GB --dataset-version v1.0.2 --output-dir /build/cadis-cache
+./scripts/prepare_release.sh /build/cadis-cache releases/stable.json
 ```
 
 `--output-dir` is the Cadis cache root. Prepared datasets will be placed under:
@@ -94,6 +117,8 @@ cadis prepare --iso2 GB --dataset-version v1.0.2 --output-dir /build/cadis-cache
 /build/cadis-cache/TW/tw.admin/v1.0.3
 /build/cadis-cache/JP/jp.admin/v1.0.4
 /build/cadis-cache/GB/gb.admin/v1.0.2
+/build/cadis-cache/IT/it.admin/v1.0.2
+/build/cadis-cache/KR/kr.admin/v1.0.1
 ```
 
 ### Step 4: Publish the prepared cache as a deployment artifact
@@ -174,10 +199,11 @@ Example:
 
 ```json
 {
-  "cadis_version": "0.3.5",
+  "cadis_version": "0.3.6",
   "datasets": {
     "TW": "v1.0.2",
-    "JP": "v1.0.3"
+    "JP": "v1.0.3",
+    "GB": "v1.0.1"
   }
 }
 ```
@@ -196,9 +222,7 @@ CACHE_ROOT="${1:?cache root required}"
 
 pip install "cadis==0.3.6"
 
-cadis prepare --iso2 TW --dataset-version v1.0.3 --output-dir "$CACHE_ROOT"
-cadis prepare --iso2 JP --dataset-version v1.0.4 --output-dir "$CACHE_ROOT"
-cadis prepare --iso2 GB --dataset-version v1.0.2 --output-dir "$CACHE_ROOT"
+./scripts/prepare_release.sh "$CACHE_ROOT" releases/stable.json
 ```
 
 ## Verification
@@ -243,5 +267,6 @@ The official deployment procedure is therefore:
 1. pin Cadis version
 2. pin dataset versions
 3. run `cadis prepare` during build
+   preferably via a pinned manifest such as `releases/stable.json`
 4. publish the prepared cache as an artifact
 5. deploy with explicit cache configuration
