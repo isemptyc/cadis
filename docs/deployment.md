@@ -35,7 +35,8 @@ Cadis should publish a repository-tracked pinned release manifest for production
 
 The default production manifest is:
 
-- [releases/stable.json](/Users/isempty/Projects/my_cadis/cadis/releases/stable.json)
+- `releases/stable.json`
+- [CI/CD examples](./cicd-examples.md)
 
 This manifest is the default approved release set for production. It pins:
 
@@ -48,6 +49,8 @@ This manifest is the default approved release set for production. It pins:
 - `stable` means explicitly reviewed and approved for production deployment
 
 Only an explicit promotion should change `stable`.
+
+For concrete examples of Git-based CI/CD usage, artifact generation, Docker image patterns, and `stable.json` promotion, see [CI/CD examples](./cicd-examples.md).
 
 ## Deployment Modes
 
