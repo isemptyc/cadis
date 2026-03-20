@@ -41,6 +41,7 @@ print(out["execution"]["lookup_status"])
 - CLI guide: [`docs/cli.md`](docs/cli.md)
 - SDK guide: [`docs/sdk.md`](docs/sdk.md)
 - Docker/REST guide: [`docs/rest.md`](docs/rest.md)
+- Deployment guide: [`docs/deployment.md`](docs/deployment.md)
 
 ## Core APIs
 
