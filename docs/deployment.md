@@ -95,7 +95,7 @@ This mode optimizes for deterministic deployment and rollback.
 Use an explicit package version in your build:
 
 ```bash
-pip install cadis==0.3.6
+pip install cadis==0.4.0
 ```
 
 ### Step 2: Define the dataset release set
@@ -107,7 +107,7 @@ Create or adopt a deployment manifest in your build system or application reposi
   "profile": "cadis.deployment.release",
   "schema_version": 1,
   "release_name": "stable",
-  "cadis_version": "0.3.6",
+  "cadis_version": "0.4.0",
   "datasets": {
     "TW": "v1.0.3",
     "JP": "v1.0.4",
@@ -216,7 +216,7 @@ Example:
 
 ```json
 {
-  "cadis_version": "0.3.6",
+  "cadis_version": "0.4.0",
   "datasets": {
     "TW": "v1.0.2",
     "JP": "v1.0.3",
@@ -237,7 +237,7 @@ set -euo pipefail
 
 CACHE_ROOT="${1:?cache root required}"
 
-pip install "cadis==0.3.6"
+pip install "cadis==0.4.0"
 
 ./scripts/prepare_release.sh "$CACHE_ROOT" releases/stable.json
 ```

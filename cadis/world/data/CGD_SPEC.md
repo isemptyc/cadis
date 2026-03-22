@@ -7,6 +7,11 @@ Attribution:
 This product includes data from Natural Earth (public domain).
 https://www.naturalearthdata.com
 
+The CGD binary format specification in this document is part of Cadis and is
+licensed with the Cadis project. The bundled `ne.global.v0.1.0.cgd` dataset is
+a transformed Natural Earth-derived dataset and remains public-domain source
+data as documented by Natural Earth.
+
 ## 1. Design Goals
 
 CGD is for:

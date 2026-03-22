@@ -1,14 +1,15 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "cadis"
-version = "0.3.6"
+version = "0.4.0"
 description = "Lat/Lon to administrative hierarchy lookup with managed datasets."
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "MIT" }
+license = "Apache-2.0"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
 authors = [{ name = "Cadis" }]
 dependencies = [
   "platformdirs>=4.0",

@@ -102,4 +102,6 @@ Additional ISO 3166-1 entity datasets will be published as they become available
 
 ## License
 
-MIT
+Cadis source code is licensed under Apache License 2.0. See [`LICENSE`](LICENSE).
+
+The bundled file [`cadis/world/data/ne.global.v0.1.0.cgd`](cadis/world/data/ne.global.v0.1.0.cgd) is transformed from Natural Earth data. Natural Earth states that its raster and vector data on the site are public domain and that no permission is needed to use it. See [`cadis/world/data/CGD_SPEC.md`](cadis/world/data/CGD_SPEC.md) and [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
