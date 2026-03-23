@@ -1,4 +1,4 @@
-"""ISO2 to country-name mapping for CLI display."""
+"""ISO2 to country-name mapping helpers."""
 
 from __future__ import annotations
 
@@ -243,3 +243,12 @@ COUNTRY_NAMES: dict[str, str] = {
     "ZM": "Zambia",
     "ZW": "Zimbabwe",
 }
+
+
+def country_name_for_iso2(iso2: str | None) -> str | None:
+    if not isinstance(iso2, str):
+        return None
+    normalized = iso2.strip().upper()
+    if len(normalized) != 2:
+        return None
+    return COUNTRY_NAMES.get(normalized)

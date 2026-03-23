@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from typing import Any, Callable, Iterable
 
 from ._cache import resolve_cache_dir
+from ._country_names import country_name_for_iso2
 from ._manager import get_manager
 from .types import BootstrapResponse, ExecutionOutcome, InfoResponse, LookupResponse, LookupState, WorldState
 from .version import __version__
@@ -162,11 +163,19 @@ def _world_state_from_context(world_context: Any, *, world_status: str) -> World
             return state
     country = world_context.get("country")
     if isinstance(country, dict) and isinstance(country.get("iso2"), str):
-        return {
+        state: WorldState = {
             "status": "ok",
             "classification": "country",
             "iso2": str(country.get("iso2")).upper(),
         }
+        name = country.get("name")
+        if isinstance(name, str) and name.strip():
+            state["name"] = name.strip()
+        else:
+            fallback_name = country_name_for_iso2(state["iso2"])
+            if fallback_name is not None:
+                state["name"] = fallback_name
+        return state
     return {
         "status": "ok",
         "classification": "unknown",

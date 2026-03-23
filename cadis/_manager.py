@@ -162,7 +162,7 @@ class CadisManager:
 
         versions_root = self._versions_root(iso2, cache_dir=cache_dir)
         if not versions_root.exists() or not versions_root.is_dir():
-            return None, {"status": "missing"}
+            return None, self._augment_dataset_state({"status": "missing"}, iso2=iso2)
 
         candidates: list[tuple[tuple[int, ...], Path]] = []
         for child in versions_root.iterdir():
@@ -178,14 +178,17 @@ class CadisManager:
             state = inspection.get("state", {}).get("dataset", {})
             status = state.get("status")
             if status == "ready":
-                return str(dataset_dir), {
-                    "status": "ready",
-                    "dataset_dir": str(dataset_dir),
-                }
+                return str(dataset_dir), self._augment_dataset_state(
+                    {
+                        "status": "ready",
+                        "dataset_dir": str(dataset_dir),
+                    },
+                    iso2=iso2,
+                )
 
         if candidates:
-            return None, {"status": "invalid"}
-        return None, {"status": "missing"}
+            return None, self._augment_dataset_state({"status": "invalid"}, iso2=iso2)
+        return None, self._augment_dataset_state({"status": "missing"}, iso2=iso2)
 
     def _create_runtime_handle_from_dataset_dir(self, iso2: str, dataset_dir: str) -> _RuntimeHandle:
         from cadis.runtime import CadisRuntime
@@ -194,11 +197,13 @@ class CadisManager:
         return _RuntimeHandle(
             runtime=runtime,
             dataset_dir=dataset_dir,
-            dataset_state={
-                "status": "ready",
-                "iso2": iso2,
-                "dataset_dir": dataset_dir,
-            },
+            dataset_state=self._augment_dataset_state(
+                {
+                    "status": "ready",
+                    "dataset_dir": dataset_dir,
+                },
+                iso2=iso2,
+            ),
         )
 
     def get_runtime_if_ready(
