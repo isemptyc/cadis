@@ -97,6 +97,7 @@ Cadis does not interpret ISO codes as political statements or sovereignty declar
 | GB   | United Kingdom   | gb.admin   | 4.8 MB                | 5.1 MB        | 2026-03-11         |
 | IT   | Italy            | it.admin   | 22.8 MB               | 25.7 MB       | 2026-03-11         |
 | KR   | South Korea      | kr.admin   | 2.3 MB                | 3.1 MB        | 2026-03-12         |
+| SE   | Sweden           | se.admin   | 0.2 MB                | 0.3 MB        | 2026-04-02         |
 
 Additional ISO 3166-1 entity datasets will be published as they become available.
 
