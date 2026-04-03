@@ -292,6 +292,59 @@ class FFSFSpatialIndexV2:
 
         return allowlist
 
+
+def _select_country_scope_feature_indices(
+    *,
+    feature_index: list[FeatureIndexEntry],
+    feature_meta_by_index: list[dict],
+) -> tuple[list[int], list[int]]:
+    """
+    Choose the geometry features used for country-scope execution.
+
+    If exporter-provided `country_scope_flag` exists, trust that as scope truth
+    but minimize execution geometry to the smallest numeric admin level among
+    the flagged features. This preserves exporter intent while avoiding country
+    checks over every in-scope municipality or subunit.
+
+    Older datasets without `country_scope_flag` continue to fall back to the
+    smallest numeric level present in geometry metadata.
+    """
+    flagged_levels: list[int] = []
+    for meta in feature_meta_by_index:
+        if meta.get("country_scope_flag") is not True:
+            continue
+        level = meta.get("level")
+        if isinstance(level, int):
+            flagged_levels.append(level)
+
+    target_level: int | None = min(flagged_levels) if flagged_levels else None
+    use_flagged_scope = target_level is not None
+
+    if target_level is None:
+        for meta in feature_meta_by_index:
+            level = meta.get("level")
+            if not isinstance(level, int):
+                continue
+            if target_level is None or level < target_level:
+                target_level = level
+
+    if target_level is None:
+        return [], []
+
+    feature_indices: list[int] = []
+    part_indices: list[int] = []
+    for feature_idx, feature in enumerate(feature_index):
+        meta = feature_meta_by_index[feature_idx]
+        if use_flagged_scope and meta.get("country_scope_flag") is not True:
+            continue
+        if meta.get("level") != target_level:
+            continue
+        feature_indices.append(feature_idx)
+        for part_idx in range(feature.part_start_idx, feature.part_start_idx + feature.part_count):
+            part_indices.append(part_idx)
+
+    return feature_indices, part_indices
+
     def _feature_contains_point(self, feature: FeatureIndexEntry, pt: Point) -> bool:
         for part_idx in range(feature.part_start_idx, feature.part_start_idx + feature.part_count):
             if self._part_contains_point(part_idx, pt):
@@ -393,35 +446,13 @@ class FFSFSpatialIndexV3:
             if isinstance(feature_id, str) and feature_id:
                 self.feature_id_to_index[feature_id] = feature_idx
 
-        self.country_scope_feature_indices: list[int] = []
-        self.country_scope_part_indices: list[int] = []
-        for feature_idx, feature in enumerate(self.feature_index):
-            meta = self.feature_meta_by_index[feature_idx]
-            if meta.get("country_scope_flag") is not True:
-                continue
-            self.country_scope_feature_indices.append(feature_idx)
-            for part_idx in range(feature.part_start_idx, feature.part_start_idx + feature.part_count):
-                self.country_scope_part_indices.append(part_idx)
-
-        # Backward compatibility: older datasets may not carry country_scope_flag.
-        # In that case, approximate country scope using the highest structural
-        # level available in geometry metadata (smallest numeric level).
-        if not self.country_scope_feature_indices:
-            min_level = None
-            for meta in self.feature_meta_by_index:
-                level = meta.get("level")
-                if not isinstance(level, int):
-                    continue
-                if min_level is None or level < min_level:
-                    min_level = level
-            if min_level is not None:
-                for feature_idx, feature in enumerate(self.feature_index):
-                    meta = self.feature_meta_by_index[feature_idx]
-                    if meta.get("level") != min_level:
-                        continue
-                    self.country_scope_feature_indices.append(feature_idx)
-                    for part_idx in range(feature.part_start_idx, feature.part_start_idx + feature.part_count):
-                        self.country_scope_part_indices.append(part_idx)
+        (
+            self.country_scope_feature_indices,
+            self.country_scope_part_indices,
+        ) = _select_country_scope_feature_indices(
+            feature_index=self.feature_index,
+            feature_meta_by_index=self.feature_meta_by_index,
+        )
 
     @classmethod
     def from_files(
