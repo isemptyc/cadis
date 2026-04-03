@@ -15,7 +15,7 @@ from .version import __version__
 
 SCHEMA_VERSION = "1"
 VERSION = __version__
-SUPPORTED_ISO2 = ["JP", "TW", "GB", "IT", "KR", "SE"]
+SUPPORTED_ISO2 = ["JP", "TW", "GB", "IT", "KR", "SE", "NO"]
 
 
 def _infer_resolution_state(
