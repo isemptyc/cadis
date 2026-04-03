@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 LookupStatus = Literal["ok", "partial", "failed"]
 DatasetStatus = Literal["ready", "missing", "invalid"]
@@ -17,6 +17,7 @@ class AdminHierarchyNode(TypedDict):
     level: int
     name: str
     source: str
+    names: NotRequired[dict[str, str]]
 
 
 class LookupResult(TypedDict, total=False):

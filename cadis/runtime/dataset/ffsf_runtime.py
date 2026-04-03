@@ -130,6 +130,19 @@ class GeomIndexV2Entry:
     ring_count: int
 
 
+def _build_public_feature_hit(*, level: int, meta: dict, source: str) -> dict:
+    hit = {
+        "level": level,
+        "name": meta.get("name"),
+        "osm_id": meta.get("feature_id"),
+        "source": source,
+    }
+    names = meta.get("names")
+    if isinstance(names, dict) and names:
+        hit["names"] = names
+    return hit
+
+
 class FFSFSpatialIndexV2:
     """
     In-memory runtime for FFSF v2 datasets.
@@ -254,13 +267,11 @@ class FFSFSpatialIndexV2:
                 continue
 
             if self._feature_contains_point(feature, pt):
-                feature_id = meta.get("feature_id")
-                hits[level] = {
-                    "level": level,
-                    "name": meta.get("name"),
-                    "osm_id": feature_id,
-                    "source": "polygon",
-                }
+                hits[level] = _build_public_feature_hit(
+                    level=level,
+                    meta=meta,
+                    source="polygon",
+                )
 
             if len(hits) == len(level_set):
                 break
@@ -551,13 +562,11 @@ class FFSFSpatialIndexV3:
                 continue
 
             if self._feature_contains_point(feature, pt):
-                feature_id = meta.get("feature_id")
-                hits[level] = {
-                    "level": level,
-                    "name": meta.get("name"),
-                    "osm_id": feature_id,
-                    "source": "polygon",
-                }
+                hits[level] = _build_public_feature_hit(
+                    level=level,
+                    meta=meta,
+                    source="polygon",
+                )
 
             if len(hits) == len(level_set):
                 break
@@ -609,13 +618,11 @@ class FFSFSpatialIndexV3:
 
         hits: dict[int, dict] = {}
         for level, (_, meta) in nearest_by_level.items():
-            feature_id = meta.get("feature_id")
-            hits[level] = {
-                "level": level,
-                "name": meta.get("name"),
-                "osm_id": feature_id,
-                "source": "nearby",
-            }
+            hits[level] = _build_public_feature_hit(
+                level=level,
+                meta=meta,
+                source="nearby",
+            )
 
         return hits
 

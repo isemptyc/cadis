@@ -425,6 +425,9 @@ def load_hierarchy_parent_map(
             "osm_id": parent.get("id"),
             "source": "admin_tree_name",
         }
+        parent_names = parent.get("names")
+        if isinstance(parent_names, dict) and parent_names:
+            by_child_name[child_name]["names"] = parent_names
     return by_child_name
 
 

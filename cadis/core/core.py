@@ -483,6 +483,11 @@ class AdminEngineCore:
                         "level": node["level"],
                         "name": node["name"],
                         "source": node.get("source", "polygon"),
+                        **(
+                            {"names": node["names"]}
+                            if isinstance(node.get("names"), dict) and node.get("names")
+                            else {}
+                        ),
                     }
                     for node in nodes
                 ],
