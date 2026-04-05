@@ -11,6 +11,7 @@ from . import bootstrap as api_bootstrap
 from . import info as api_info
 from . import lookup as api_lookup
 from . import reinstall as api_reinstall
+from ._cache import resolve_cache_dir
 from ._country_names import COUNTRY_NAMES
 
 
@@ -29,7 +30,7 @@ def _build_parser() -> argparse.ArgumentParser:
     prepare_parser = subparsers.add_parser("prepare")
     prepare_parser.add_argument("--iso2", required=True)
     prepare_parser.add_argument("--dataset-version")
-    prepare_parser.add_argument("--output-dir", required=True)
+    prepare_parser.add_argument("--output-dir")
     return parser
 
 
@@ -403,7 +404,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         dataset_dir = dataset.get("dataset_dir") if isinstance(dataset, dict) else None
         dataset_version = dataset.get("dataset_version") if isinstance(dataset, dict) else None
         iso2 = str(args.iso2).upper()
-        print(f"Prepared dataset for {iso2} under cache root {args.output_dir}")
+        resolved_output_dir = args.output_dir or str(resolve_cache_dir())
+        print(f"Prepared dataset for {iso2} under cache root {resolved_output_dir}")
         if isinstance(dataset_dir, str) and dataset_dir.strip():
             print(f"Dataset dir: {dataset_dir}")
         if isinstance(dataset_version, str) and dataset_version.strip():
