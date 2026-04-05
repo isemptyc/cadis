@@ -283,9 +283,41 @@ def _print_lookup_human(payload: dict[str, Any], *, lat: float, lon: float) -> i
     else:
         status = payload.get("lookup_status")
 
-    summary = _summarize_result(payload)
-    region = summary or _region_from_state(payload)
-    print(f"Region: {region}")
+    result = payload.get("result", {})
+    country = result.get("country", {})
+    country_name = country.get("name") if isinstance(country, dict) else None
+
+    if not country_name:
+        country_name = _region_from_state(payload)
+
+    print(f"Region: {country_name}")
+
+    hierarchy = result.get("admin_hierarchy")
+    if isinstance(hierarchy, list):
+        for node in hierarchy:
+            if not isinstance(node, dict):
+                continue
+            rank = node.get("rank")
+            name = node.get("name")
+            names = node.get("names", {})
+
+            primary_lang = None
+            if isinstance(names, dict):
+                for lang, val in names.items():
+                    if val == name:
+                        primary_lang = lang
+                        break
+
+            line = f"Rank {rank}: {name}"
+            if primary_lang:
+                line += f"({primary_lang})"
+            print(line)
+
+            if isinstance(names, dict):
+                for lang, val in names.items():
+                    if val == name:
+                        continue
+                    print(f"        {val}({lang})")
 
     if status == "failed":
         code, should_retry = _maybe_run_remediation(payload)
@@ -302,9 +334,17 @@ def _print_lookup_human(payload: dict[str, Any], *, lat: float, lon: float) -> i
             retry_status = retry_execution.get("lookup_status")
         else:
             retry_status = retry_payload.get("lookup_status")
-        retry_summary = _summarize_result(retry_payload)
-        retry_region = retry_summary or _region_from_state(retry_payload)
-        print(f"Region: {retry_region}")
+        
+        # Recalculate summary for retry
+        retry_result = retry_payload.get("result", {})
+        retry_country = retry_result.get("country", {})
+        retry_country_name = retry_country.get("name") if isinstance(retry_country, dict) else None
+        if not retry_country_name:
+            retry_country_name = _region_from_state(retry_payload)
+        
+        print(f"Region: {retry_country_name}")
+        # Note: We don't print the full hierarchy again for retry in this implementation
+        # to keep it simple, but we could if needed.
         return 0 if retry_status in {"ok", "partial"} else 1
 
     if status == "partial":
