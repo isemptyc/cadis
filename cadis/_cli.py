@@ -284,9 +284,13 @@ def _print_lookup_human(payload: dict[str, Any], *, lat: float, lon: float) -> i
     else:
         status = payload.get("lookup_status")
 
-    result = payload.get("result", {})
-    country = result.get("country", {})
-    country_name = country.get("name") if isinstance(country, dict) else None
+    result = payload.get("result")
+    if not isinstance(result, dict):
+        result = {}
+    country = result.get("country")
+    if not isinstance(country, dict):
+        country = {}
+    country_name = country.get("name")
 
     if not country_name:
         country_name = _region_from_state(payload)
@@ -337,9 +341,13 @@ def _print_lookup_human(payload: dict[str, Any], *, lat: float, lon: float) -> i
             retry_status = retry_payload.get("lookup_status")
         
         # Recalculate summary for retry
-        retry_result = retry_payload.get("result", {})
-        retry_country = retry_result.get("country", {})
-        retry_country_name = retry_country.get("name") if isinstance(retry_country, dict) else None
+        retry_result = retry_payload.get("result")
+        if not isinstance(retry_result, dict):
+            retry_result = {}
+        retry_country = retry_result.get("country")
+        if not isinstance(retry_country, dict):
+            retry_country = {}
+        retry_country_name = retry_country.get("name")
         if not retry_country_name:
             retry_country_name = _region_from_state(retry_payload)
         
