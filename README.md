@@ -92,14 +92,14 @@ Cadis does not interpret ISO codes as political statements or sovereignty declar
 
 | ISO2 | Name             | Dataset ID | Package Size (tar.gz) | Unpacked Size | Release Date (UTC) |
 |:-----|:---------------- |:-----------|----------------------:|--------------:|-------------------:|
-| TW   | Taiwan           | tw.admin   | 1.8 MB                | 2.0 MB        | 2026-02-28         |
-| JP   | Japan            | jp.admin   | 20.4 MB               | 21.3 MB       | 2026-03-05         |
-| GB   | United Kingdom   | gb.admin   | 4.8 MB                | 5.1 MB        | 2026-03-11         |
-| IT   | Italy            | it.admin   | 22.8 MB               | 25.7 MB       | 2026-03-11         |
-| KR   | South Korea      | kr.admin   | 2.3 MB                | 3.1 MB        | 2026-03-12         |
-| SE   | Sweden           | se.admin   | 0.2 MB                | 0.3 MB        | 2026-04-02         |
-| NO   | Norway           | no.admin   | 0.1 MB                | 0.3 MB        | 2026-04-03         |
-| DK   | Denmark          | dk.admin   | 0.1 MB                | 0.2 MB        | 2026-04-03         |
+| TW   | Taiwan           | tw.admin   | 1.8 MB                | 2.0 MB        | 2026-04-05         |
+| JP   | Japan            | jp.admin   | 20.4 MB               | 21.4 MB       | 2026-04-05         |
+| GB   | United Kingdom   | gb.admin   | 4.8 MB                | 5.2 MB        | 2026-04-05         |
+| IT   | Italy            | it.admin   | 22.9 MB               | 26.0 MB       | 2026-04-05         |
+| KR   | South Korea      | kr.admin   | 2.4 MB                | 3.6 MB        | 2026-04-05         |
+| SE   | Sweden           | se.admin   | 0.2 MB                | 0.3 MB        | 2026-04-05         |
+| NO   | Norway           | no.admin   | 0.1 MB                | 0.3 MB        | 2026-04-05         |
+| DK   | Denmark          | dk.admin   | 0.1 MB                | 0.2 MB        | 2026-04-05         |
 | BE   | Belgium          | be.admin   | 2.5 MB                | 2.8 MB        | 2026-04-04         |
 
 Additional ISO 3166-1 entity datasets will be published as they become available.
