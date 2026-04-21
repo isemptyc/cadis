@@ -297,8 +297,10 @@ def _print_lookup_human(payload: dict[str, Any], *, lat: float, lon: float) -> i
 
     print(f"Region: {country_name}")
 
-    hierarchy = result.get("admin_hierarchy")
-    if isinstance(hierarchy, list):
+    def _print_hierarchy(result_payload: dict[str, Any]) -> None:
+        hierarchy = result_payload.get("admin_hierarchy")
+        if not isinstance(hierarchy, list):
+            return
         for node in hierarchy:
             if not isinstance(node, dict):
                 continue
@@ -323,6 +325,8 @@ def _print_lookup_human(payload: dict[str, Any], *, lat: float, lon: float) -> i
                     if val == name:
                         continue
                     print(f"        {val}({lang})")
+
+    _print_hierarchy(result)
 
     if status == "failed":
         code, should_retry = _maybe_run_remediation(payload)
@@ -350,10 +354,9 @@ def _print_lookup_human(payload: dict[str, Any], *, lat: float, lon: float) -> i
         retry_country_name = retry_country.get("name")
         if not retry_country_name:
             retry_country_name = _region_from_state(retry_payload)
-        
+
         print(f"Region: {retry_country_name}")
-        # Note: We don't print the full hierarchy again for retry in this implementation
-        # to keep it simple, but we could if needed.
+        _print_hierarchy(retry_result)
         return 0 if retry_status in {"ok", "partial"} else 1
 
     if status == "partial":
