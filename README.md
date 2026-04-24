@@ -101,6 +101,7 @@ Cadis does not interpret ISO codes as political statements or sovereignty declar
 | NO   | Norway           | no.admin   | 0.1 MB                | 0.3 MB        | 2026-04-05         |
 | DK   | Denmark          | dk.admin   | 0.1 MB                | 0.2 MB        | 2026-04-05         |
 | BE   | Belgium          | be.admin   | 2.5 MB                | 2.8 MB        | 2026-04-04         |
+| NL   | Netherlands      | nl.admin   | 2.6 MB                | 2.8 MB        | 2026-04-11         |
 
 Additional ISO 3166-1 entity datasets will be published as they become available.
 
