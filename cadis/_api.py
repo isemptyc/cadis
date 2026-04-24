@@ -7,7 +7,8 @@ import math
 import os
 import re
 import struct
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Iterable
@@ -59,6 +60,28 @@ class _OpenSeaLookupRecord:
     lat: float
     lon: float
     world_state: WorldState
+
+
+@dataclass
+class _LookupManyDiagnostics:
+    counters: dict[str, int] = field(default_factory=dict)
+    timings_sec: dict[str, float] = field(default_factory=dict)
+    rows_by_iso2: dict[str, int] = field(default_factory=dict)
+    runtime_groups: list[dict[str, object]] = field(default_factory=list)
+
+    def inc(self, key: str, amount: int = 1) -> None:
+        self.counters[key] = self.counters.get(key, 0) + amount
+
+    def add_time(self, key: str, elapsed_sec: float) -> None:
+        self.timings_sec[key] = round(self.timings_sec.get(key, 0.0) + elapsed_sec, 6)
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "counters": dict(sorted(self.counters.items())),
+            "timings_sec": dict(sorted(self.timings_sec.items())),
+            "rows_by_iso2": dict(sorted(self.rows_by_iso2.items())),
+            "runtime_groups": list(self.runtime_groups),
+        }
 
 
 def _infer_resolution_state(
@@ -716,8 +739,13 @@ def _lookup_country_rows(
     iso2: str,
     rows: list[_ResolvedLookupRecord],
     cache_dir: str | Path | None = None,
+    diagnostics: _LookupManyDiagnostics | None = None,
 ) -> dict[int, LookupResponse]:
     output: dict[int, LookupResponse] = {}
+    if diagnostics is not None:
+        diagnostics.inc("runtime_groups_processed")
+        diagnostics.inc("runtime_group_rows", len(rows))
+        diagnostics.runtime_groups.append({"iso2": iso2, "rows": len(rows)})
     try:
         runtime_handle, dataset_state = manager.get_runtime_readiness(iso2, cache_dir=cache_dir)
     except Exception:
@@ -803,7 +831,7 @@ def _lookup_many_output(point_id: str, payload: LookupResponse) -> LookupManyRes
 
 
 def _finalize_lookup_many_results(
-    rows: list[dict[str, object]],
+    rows: list[object],
     results: list[LookupManyResponseItem | None],
 ) -> list[LookupManyResponseItem]:
     finalized: list[LookupManyResponseItem] = []
@@ -825,6 +853,7 @@ def _resolve_open_sea_lookup_rows(
     manager: Any,
     rows: list[_OpenSeaLookupRecord],
     cache_dir: str | Path | None = None,
+    diagnostics: _LookupManyDiagnostics | None = None,
 ) -> list[_ResolvedLookupRecord]:
     candidate_iso2_by_index: dict[int, list[str]] = {}
     candidate_union: set[str] = set()
@@ -837,9 +866,14 @@ def _resolve_open_sea_lookup_rows(
         )
         candidate_iso2_by_index[row.index] = candidates
         candidate_union.update(candidates)
+        if diagnostics is not None:
+            diagnostics.inc("offshore_candidate_rows")
+            diagnostics.inc("offshore_candidate_checks", len(candidates))
 
     nearest_by_index: dict[int, tuple[float, str]] = {}
     for iso2 in sorted(candidate_union):
+        if diagnostics is not None:
+            diagnostics.inc("offshore_runtime_groups_considered")
         try:
             runtime_handle, dataset_state = manager.get_runtime_readiness(iso2, cache_dir=cache_dir)
         except Exception:
@@ -894,20 +928,64 @@ def lookup_many(
     cache_dir: str | Path | None = None,
     allowed_iso2: Iterable[str] | None = None,
 ) -> list[LookupManyResponseItem]:
+    return _lookup_many_impl(
+        points,
+        cache_dir=cache_dir,
+        allowed_iso2=allowed_iso2,
+        diagnostics=None,
+    )
+
+
+def _lookup_many_with_diagnostics(
+    points: Iterable[dict[str, object]],
+    *,
+    cache_dir: str | Path | None = None,
+    allowed_iso2: Iterable[str] | None = None,
+) -> dict[str, object]:
+    diagnostics = _LookupManyDiagnostics()
+    results = _lookup_many_impl(
+        points,
+        cache_dir=cache_dir,
+        allowed_iso2=allowed_iso2,
+        diagnostics=diagnostics,
+    )
+    return {"results": results, "diagnostics": diagnostics.as_dict()}
+
+
+def _lookup_many_impl(
+    points: Iterable[dict[str, object]],
+    *,
+    cache_dir: str | Path | None,
+    allowed_iso2: Iterable[str] | None,
+    diagnostics: _LookupManyDiagnostics | None,
+) -> list[LookupManyResponseItem]:
+    total_start = time.perf_counter()
     rows = list(points)
     results: list[LookupManyResponseItem | None] = [None] * len(rows)
     valid_rows: list[_LookupManyRecord] = []
+    validation_start = time.perf_counter()
+    if diagnostics is not None:
+        diagnostics.counters["input_rows"] = len(rows)
     for index, point in enumerate(rows):
         point_id = _lookup_many_point_id(point, index)
         coords = _lookup_many_point_coords(point)
         if coords is None:
+            if diagnostics is not None:
+                diagnostics.inc("invalid_rows")
             results[index] = _lookup_many_output(point_id, _failed_output(state={"input": {"status": "invalid"}}))
             continue
         valid_rows.append(_LookupManyRecord(index=index, id=point_id, lat=coords[0], lon=coords[1]))
+    if diagnostics is not None:
+        diagnostics.counters["valid_rows"] = len(valid_rows)
+        diagnostics.add_time("input_validation", time.perf_counter() - validation_start)
 
     if not valid_rows:
-        return _finalize_lookup_many_results(rows, results)
+        finalized = _finalize_lookup_many_results(rows, results)
+        if diagnostics is not None:
+            diagnostics.add_time("total", time.perf_counter() - total_start)
+        return finalized
 
+    manager_start = time.perf_counter()
     manager = get_manager(cache_dir=cache_dir, allowed_iso2=allowed_iso2)
     try:
         global_lookup = manager.get_or_init_global_lookup()
@@ -917,10 +995,19 @@ def lookup_many(
                 row.id,
                 _failed_output(state={"world": {"status": "failed", "classification": "unknown"}}),
             )
-        return _finalize_lookup_many_results(rows, results)
+            if diagnostics is not None:
+                diagnostics.inc("world_failed_rows")
+        finalized = _finalize_lookup_many_results(rows, results)
+        if diagnostics is not None:
+            diagnostics.add_time("manager_init", time.perf_counter() - manager_start)
+            diagnostics.add_time("total", time.perf_counter() - total_start)
+        return finalized
+    if diagnostics is not None:
+        diagnostics.add_time("manager_init", time.perf_counter() - manager_start)
 
     resolved_rows: list[_ResolvedLookupRecord] = []
     open_sea_rows: list[_OpenSeaLookupRecord] = []
+    world_start = time.perf_counter()
     for row in valid_rows:
         try:
             world_result = global_lookup.lookup(row.lat, row.lon)
@@ -929,6 +1016,8 @@ def lookup_many(
                 row.id,
                 _failed_output(state={"world": {"status": "failed", "classification": "unknown"}}),
             )
+            if diagnostics is not None:
+                diagnostics.inc("world_failed_rows")
             continue
 
         if not isinstance(world_result, dict):
@@ -936,6 +1025,8 @@ def lookup_many(
                 row.id,
                 _failed_output(state={"world": {"status": "failed", "classification": "unknown"}}),
             )
+            if diagnostics is not None:
+                diagnostics.inc("world_failed_rows")
             continue
 
         world_status = str(world_result.get("lookup_status", "failed"))
@@ -943,6 +1034,8 @@ def lookup_many(
         world_state = _world_state_from_context(world_context, world_status=world_status)
         if world_status != "ok":
             results[row.index] = _lookup_many_output(row.id, _failed_output(state={"world": world_state}))
+            if diagnostics is not None:
+                diagnostics.inc("world_failed_rows")
             continue
 
         iso2 = _extract_iso2(world_context)
@@ -956,9 +1049,13 @@ def lookup_many(
                     world_state=world_state,
                 )
             )
+            if diagnostics is not None:
+                diagnostics.inc("open_sea_rows")
             continue
         if iso2 is None:
             results[row.index] = _lookup_many_output(row.id, _failed_output(state={"world": world_state}))
+            if diagnostics is not None:
+                diagnostics.inc("terminal_non_country_rows")
             continue
 
         resolved_rows.append(
@@ -971,24 +1068,41 @@ def lookup_many(
                 iso2=iso2,
             )
         )
+        if diagnostics is not None:
+            diagnostics.inc("direct_country_rows")
+    if diagnostics is not None:
+        diagnostics.add_time("world_pass", time.perf_counter() - world_start)
 
     offshore_resolved_indexes: set[int] = set()
     if open_sea_rows:
+        offshore_start = time.perf_counter()
         offshore_resolved = _resolve_open_sea_lookup_rows(
             manager=manager,
             rows=open_sea_rows,
             cache_dir=cache_dir,
+            diagnostics=diagnostics,
         )
         resolved_rows.extend(offshore_resolved)
         offshore_resolved_indexes = {row.index for row in offshore_resolved}
+        if diagnostics is not None:
+            diagnostics.inc("offshore_resolved_rows", len(offshore_resolved))
         for row in open_sea_rows:
             if row.index not in offshore_resolved_indexes:
                 results[row.index] = _lookup_many_output(row.id, _failed_output(state={"world": row.world_state}))
+                if diagnostics is not None:
+                    diagnostics.inc("terminal_non_country_rows")
+        if diagnostics is not None:
+            diagnostics.add_time("offshore_candidate_pass", time.perf_counter() - offshore_start)
 
+    grouping_start = time.perf_counter()
     by_iso2: dict[str, list[_ResolvedLookupRecord]] = {}
     for row in resolved_rows:
         by_iso2.setdefault(row.iso2, []).append(row)
+    if diagnostics is not None:
+        diagnostics.rows_by_iso2 = {iso2: len(items) for iso2, items in by_iso2.items()}
+        diagnostics.add_time("country_grouping", time.perf_counter() - grouping_start)
 
+    country_start = time.perf_counter()
     for iso2 in sorted(by_iso2):
         grouped_rows = sorted(by_iso2[iso2], key=lambda item: (item.lat, item.lon, item.id, item.index))
         for index, payload in _lookup_country_rows(
@@ -996,10 +1110,18 @@ def lookup_many(
             iso2=iso2,
             rows=grouped_rows,
             cache_dir=cache_dir,
+            diagnostics=diagnostics,
         ).items():
             results[index] = _lookup_many_output(_lookup_many_point_id(rows[index], index), payload)
+    if diagnostics is not None:
+        diagnostics.add_time("country_runtime_pass", time.perf_counter() - country_start)
 
-    return _finalize_lookup_many_results(rows, results)
+    finalize_start = time.perf_counter()
+    finalized = _finalize_lookup_many_results(rows, results)
+    if diagnostics is not None:
+        diagnostics.add_time("result_finalization", time.perf_counter() - finalize_start)
+        diagnostics.add_time("total", time.perf_counter() - total_start)
+    return finalized
 
 
 def bootstrap(
