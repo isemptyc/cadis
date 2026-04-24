@@ -5,8 +5,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable
 
-from ._api import bootstrap, classify_world, info, lookup, reinstall
-from .types import BootstrapResponse, InfoResponse, LookupResponse, WorldClassificationResponse
+from ._api import bootstrap, classify_world, info, lookup, lookup_many, reinstall
+from .types import (
+    BootstrapResponse,
+    InfoResponse,
+    LookupManyPoint,
+    LookupManyResponseItem,
+    LookupResponse,
+    WorldClassificationResponse,
+)
 
 
 class CadisSDK:
@@ -41,6 +48,19 @@ class CadisSDK:
         return lookup(
             lat,
             lon,
+            cache_dir=self._cache_dir_or_default(cache_dir),
+            allowed_iso2=self._allowed_iso2_or_default(allowed_iso2),
+        )
+
+    def lookup_many(
+        self,
+        points: Iterable[LookupManyPoint],
+        *,
+        cache_dir: str | Path | None = None,
+        allowed_iso2: Iterable[str] | None = None,
+    ) -> list[LookupManyResponseItem]:
+        return lookup_many(
+            points,
             cache_dir=self._cache_dir_or_default(cache_dir),
             allowed_iso2=self._allowed_iso2_or_default(allowed_iso2),
         )

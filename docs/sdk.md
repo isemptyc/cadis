@@ -10,11 +10,18 @@ sdk = CadisSDK(
     allowed_iso2=["JP", "TW"],
 )
 out = sdk.lookup(25.0330, 121.5654)
+batch = sdk.lookup_many(
+    points=[
+        {"id": "row-1", "lat": 35.0, "lon": 139.0},
+        {"id": "row-2", "lat": 56.34, "lon": 12.31},
+    ],
+)
 ```
 
 ### Contract
 
 - `lookup()` is deterministic and side-effect free.
+- `lookup_many()` preserves input order and input identity while returning the same per-point lookup payload shape as `lookup()`.
 - No prompt, no implicit bootstrap/reinstall.
 - Caller decides remediation by inspecting `execution` + `state`.
 - SDK instances can carry an explicit cache root and dataset allowlist.
@@ -36,6 +43,7 @@ sdk = CadisSDK(
 This context is used by:
 
 - `sdk.lookup(...)`
+- `sdk.lookup_many(...)`
 - `sdk.classify_world(...)`
 - `sdk.info()`
 - `sdk.bootstrap(...)`
@@ -45,6 +53,7 @@ You can also override the context per call:
 
 ```python
 sdk.lookup(35.68, 139.76, cache_dir="/tmp/alternate-cache")
+sdk.lookup_many([{"id": "tokyo", "lat": 35.68, "lon": 139.76}], allowed_iso2=["JP"])
 sdk.classify_world(35.68, 139.76, allowed_iso2=["JP"])
 sdk.info(allowed_iso2=["TW"])
 ```
@@ -171,6 +180,33 @@ Open sea and other terminal world regions are also successful classifications:
   "result": {...} | None
 }
 ```
+
+## `lookup_many()` Return Value
+
+`lookup_many()` accepts iterable point dictionaries with `id`, `lat`, and `lon` fields:
+
+```python
+out = sdk.lookup_many(
+    points=[
+        {"id": "row-id-1", "lat": 35.0, "lon": 139.0},
+        {"id": "row-id-2", "lat": 56.34, "lon": 12.31},
+    ],
+    allowed_iso2=["JP", "SE", "DK"],
+)
+```
+
+It returns one item per input point, in the same order:
+
+```python
+[
+  {"id": "row-id-1", "lookup": {...}},
+  {"id": "row-id-2", "lookup": {...}},
+]
+```
+
+Each `lookup` value is the same payload schema returned by `lookup()`. Invalid point dictionaries produce a failed lookup payload with `resolution_state="invalid_input"` and preserve the row identity.
+
+The current implementation is a compatibility batch surface over the deterministic single-point lookup path. Cadis owns future internal batch planning, including world-pass grouping, offshore candidate selection, bounded country-runtime loading, and ordered result return behind this public method.
 
 ### Top-Level Fields
 
@@ -663,7 +699,7 @@ Invalid input:
 
 Cadis resolves the cache root in this order:
 
-1. `cache_dir=` argument passed to `lookup()`, `classify_world()`, `info()`, `bootstrap()`, or `reinstall()`
+1. `cache_dir=` argument passed to `lookup()`, `lookup_many()`, `classify_world()`, `info()`, `bootstrap()`, or `reinstall()`
 2. `CadisSDK(cache_dir=...)` constructor default
 3. `CADIS_CACHE_DIR` environment variable
 4. platform default from `platformdirs`
@@ -671,7 +707,7 @@ Cadis resolves the cache root in this order:
 
 Cadis resolves the dataset allowlist in this order:
 
-1. `allowed_iso2=` argument passed to `lookup()`, `classify_world()`, `info()`, `bootstrap()`, or `reinstall()`
+1. `allowed_iso2=` argument passed to `lookup()`, `lookup_many()`, `classify_world()`, `info()`, `bootstrap()`, or `reinstall()`
 2. `CadisSDK(allowed_iso2=...)` constructor default
 3. `CADIS_ALLOWED_ISO2` environment variable
 4. no lockdown policy

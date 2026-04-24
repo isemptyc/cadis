@@ -18,6 +18,7 @@ from .types import (
     BootstrapResponse,
     ExecutionOutcome,
     InfoResponse,
+    LookupManyResponseItem,
     LookupResponse,
     LookupState,
     WorldClassificationResponse,
@@ -660,6 +661,48 @@ def lookup(
         },
         "result": admin_result.get("result"),
     }
+
+
+def _lookup_many_point_id(point: object, index: int) -> str:
+    if isinstance(point, dict):
+        raw_id = point.get("id")
+        if isinstance(raw_id, str) and raw_id:
+            return raw_id
+    return str(index)
+
+
+def _lookup_many_point_coords(point: object) -> tuple[float, float] | None:
+    if not isinstance(point, dict):
+        return None
+    lat = point.get("lat")
+    lon = point.get("lon")
+    if not isinstance(lat, (float, int)) or not isinstance(lon, (float, int)):
+        return None
+    return float(lat), float(lon)
+
+
+def lookup_many(
+    points: Iterable[dict[str, object]],
+    *,
+    cache_dir: str | Path | None = None,
+    allowed_iso2: Iterable[str] | None = None,
+) -> list[LookupManyResponseItem]:
+    rows = list(points)
+    results: list[LookupManyResponseItem] = []
+    for index, point in enumerate(rows):
+        point_id = _lookup_many_point_id(point, index)
+        coords = _lookup_many_point_coords(point)
+        if coords is None:
+            lookup_payload = _failed_output(state={"input": {"status": "invalid"}})
+        else:
+            lookup_payload = lookup(
+                coords[0],
+                coords[1],
+                cache_dir=cache_dir,
+                allowed_iso2=allowed_iso2,
+            )
+        results.append({"id": point_id, "lookup": lookup_payload})
+    return results
 
 
 def bootstrap(

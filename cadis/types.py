@@ -69,6 +69,17 @@ class LookupResponse(TypedDict, total=False):
     result: dict[str, object] | None
 
 
+class LookupManyPoint(TypedDict):
+    id: str
+    lat: float
+    lon: float
+
+
+class LookupManyResponseItem(TypedDict):
+    id: str
+    lookup: LookupResponse
+
+
 class WorldClassificationResponse(TypedDict, total=False):
     engine: str
     version: str

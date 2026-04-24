@@ -49,6 +49,7 @@ print(out["execution"]["lookup_status"])
 ## Core APIs
 
 - `lookup(lat, lon)`
+- `lookup_many(points=[{"id": "...", "lat": ..., "lon": ...}])`
 - `bootstrap(iso2, ...)`
 - `reinstall(iso2, ...)`
 - `info()`
