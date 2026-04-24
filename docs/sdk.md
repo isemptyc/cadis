@@ -206,7 +206,7 @@ It returns one item per input point, in the same order:
 
 Each `lookup` value is the same payload schema returned by `lookup()`. Invalid point dictionaries produce a failed lookup payload with `resolution_state="invalid_input"` and preserve the row identity.
 
-The current implementation is a compatibility batch surface over the deterministic single-point lookup path. Cadis owns future internal batch planning, including world-pass grouping, offshore candidate selection, bounded country-runtime loading, and ordered result return behind this public method.
+`lookup_many()` performs deterministic batch planning internally. Cadis validates inputs, runs a world pass, resolves open-sea/offshore candidates, groups resolvable rows by ISO2, processes country groups in stable order, and writes results back to the original input order.
 
 ### Top-Level Fields
 

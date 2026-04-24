@@ -7,6 +7,7 @@ import math
 import os
 import re
 import struct
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Iterable
@@ -28,9 +29,36 @@ from .version import __version__
 
 SCHEMA_VERSION = "1"
 VERSION = __version__
-SUPPORTED_ISO2 = ["JP", "TW", "GB", "IT", "KR", "SE", "NO", "DK", "BE", "NL"]
+SUPPORTED_ISO2 = ["JP", "TW", "GB", "IT", "KR", "SE", "NO", "DK", "BE", "NL", "FR"]
 OFFSHORE_CANDIDATE_MARGIN_KM = 5.0
 OFFSHORE_MAX_CANDIDATES = 5
+
+
+@dataclass(frozen=True)
+class _LookupManyRecord:
+    index: int
+    id: str
+    lat: float
+    lon: float
+
+
+@dataclass(frozen=True)
+class _ResolvedLookupRecord:
+    index: int
+    id: str
+    lat: float
+    lon: float
+    world_state: WorldState
+    iso2: str
+
+
+@dataclass(frozen=True)
+class _OpenSeaLookupRecord:
+    index: int
+    id: str
+    lat: float
+    lon: float
+    world_state: WorldState
 
 
 def _infer_resolution_state(
@@ -612,6 +640,25 @@ def lookup(
     if iso2 is None:
         return _failed_output(state={"world": world_state})
 
+    return _lookup_country(
+        manager=manager,
+        iso2=iso2,
+        world_state=world_state,
+        lat=float(lat),
+        lon=float(lon),
+        cache_dir=cache_dir,
+    )
+
+
+def _lookup_country(
+    *,
+    manager: Any,
+    iso2: str,
+    world_state: WorldState,
+    lat: float,
+    lon: float,
+    cache_dir: str | Path | None = None,
+) -> LookupResponse:
     try:
         runtime_handle, dataset_state = manager.get_runtime_readiness(iso2, cache_dir=cache_dir)
     except Exception:
@@ -663,6 +710,74 @@ def lookup(
     }
 
 
+def _lookup_country_rows(
+    *,
+    manager: Any,
+    iso2: str,
+    rows: list[_ResolvedLookupRecord],
+    cache_dir: str | Path | None = None,
+) -> dict[int, LookupResponse]:
+    output: dict[int, LookupResponse] = {}
+    try:
+        runtime_handle, dataset_state = manager.get_runtime_readiness(iso2, cache_dir=cache_dir)
+    except Exception:
+        for row in rows:
+            output[row.index] = _failed_output(
+                state={
+                    "world": row.world_state,
+                    "dataset": {"status": "invalid", "iso2": iso2},
+                },
+            )
+        return output
+
+    if runtime_handle is None:
+        for row in rows:
+            output[row.index] = _failed_output(
+                state={
+                    "world": row.world_state,
+                    "dataset": dataset_state,
+                },
+            )
+        return output
+
+    for row in rows:
+        try:
+            admin_result = runtime_handle.runtime.lookup(row.lat, row.lon)
+        except Exception:
+            output[row.index] = _failed_output(
+                state={"world": row.world_state, "dataset": runtime_handle.dataset_state},
+            )
+            continue
+
+        if not isinstance(admin_result, dict):
+            output[row.index] = _failed_output(
+                state={"world": row.world_state, "dataset": runtime_handle.dataset_state},
+            )
+            continue
+
+        runtime_status = str(admin_result.get("lookup_status", "failed"))
+        if runtime_status not in {"ok", "partial", "failed"}:
+            runtime_status = "failed"
+
+        output[row.index] = {
+            "engine": "cadis",
+            "version": VERSION,
+            "execution": _execution_outcome(
+                lookup_status=runtime_status,
+                state={
+                    "world": row.world_state,
+                    "dataset": runtime_handle.dataset_state,
+                },
+            ),
+            "state": {
+                "world": row.world_state,
+                "dataset": runtime_handle.dataset_state,
+            },
+            "result": admin_result.get("result"),
+        }
+    return output
+
+
 def _lookup_many_point_id(point: object, index: int) -> str:
     if isinstance(point, dict):
         raw_id = point.get("id")
@@ -678,7 +793,99 @@ def _lookup_many_point_coords(point: object) -> tuple[float, float] | None:
     lon = point.get("lon")
     if not isinstance(lat, (float, int)) or not isinstance(lon, (float, int)):
         return None
+    if lat < -90 or lat > 90 or lon < -180 or lon > 180:
+        return None
     return float(lat), float(lon)
+
+
+def _lookup_many_output(point_id: str, payload: LookupResponse) -> LookupManyResponseItem:
+    return {"id": point_id, "lookup": payload}
+
+
+def _finalize_lookup_many_results(
+    rows: list[dict[str, object]],
+    results: list[LookupManyResponseItem | None],
+) -> list[LookupManyResponseItem]:
+    finalized: list[LookupManyResponseItem] = []
+    for index, item in enumerate(results):
+        if item is not None:
+            finalized.append(item)
+            continue
+        finalized.append(
+            _lookup_many_output(
+                _lookup_many_point_id(rows[index], index),
+                _failed_output(state={"world": {"status": "failed", "classification": "unknown"}}),
+            )
+        )
+    return finalized
+
+
+def _resolve_open_sea_lookup_rows(
+    *,
+    manager: Any,
+    rows: list[_OpenSeaLookupRecord],
+    cache_dir: str | Path | None = None,
+) -> list[_ResolvedLookupRecord]:
+    candidate_iso2_by_index: dict[int, list[str]] = {}
+    candidate_union: set[str] = set()
+    for row in rows:
+        candidates = _offshore_candidate_iso2(
+            manager=manager,
+            lat=row.lat,
+            lon=row.lon,
+            cache_dir=cache_dir,
+        )
+        candidate_iso2_by_index[row.index] = candidates
+        candidate_union.update(candidates)
+
+    nearest_by_index: dict[int, tuple[float, str]] = {}
+    for iso2 in sorted(candidate_union):
+        try:
+            runtime_handle, dataset_state = manager.get_runtime_readiness(iso2, cache_dir=cache_dir)
+        except Exception:
+            continue
+        if runtime_handle is None:
+            continue
+        if not isinstance(dataset_state, dict) or dataset_state.get("status") != "ready":
+            continue
+
+        pipeline = getattr(getattr(runtime_handle, "runtime", None), "_pipeline", None)
+        policy = getattr(pipeline, "policy", None)
+        offshore_km = getattr(policy, "offshore_max_distance_km", None)
+        if offshore_km is None:
+            continue
+
+        for row in rows:
+            if iso2 not in candidate_iso2_by_index.get(row.index, ()):
+                continue
+            distance_km = _runtime_offshore_distance_km(runtime_handle, lat=row.lat, lon=row.lon)
+            if distance_km is None or distance_km > float(offshore_km):
+                continue
+            current = nearest_by_index.get(row.index)
+            if current is None or (distance_km, iso2) < current:
+                nearest_by_index[row.index] = (distance_km, iso2)
+
+    resolved: list[_ResolvedLookupRecord] = []
+    for row in rows:
+        nearest = nearest_by_index.get(row.index)
+        if nearest is None:
+            continue
+        iso2 = nearest[1]
+        resolved.append(
+            _ResolvedLookupRecord(
+                index=row.index,
+                id=row.id,
+                lat=row.lat,
+                lon=row.lon,
+                world_state={
+                    "status": "ok",
+                    "classification": "country",
+                    "iso2": iso2,
+                },
+                iso2=iso2,
+            )
+        )
+    return resolved
 
 
 def lookup_many(
@@ -688,21 +895,111 @@ def lookup_many(
     allowed_iso2: Iterable[str] | None = None,
 ) -> list[LookupManyResponseItem]:
     rows = list(points)
-    results: list[LookupManyResponseItem] = []
+    results: list[LookupManyResponseItem | None] = [None] * len(rows)
+    valid_rows: list[_LookupManyRecord] = []
     for index, point in enumerate(rows):
         point_id = _lookup_many_point_id(point, index)
         coords = _lookup_many_point_coords(point)
         if coords is None:
-            lookup_payload = _failed_output(state={"input": {"status": "invalid"}})
-        else:
-            lookup_payload = lookup(
-                coords[0],
-                coords[1],
-                cache_dir=cache_dir,
-                allowed_iso2=allowed_iso2,
+            results[index] = _lookup_many_output(point_id, _failed_output(state={"input": {"status": "invalid"}}))
+            continue
+        valid_rows.append(_LookupManyRecord(index=index, id=point_id, lat=coords[0], lon=coords[1]))
+
+    if not valid_rows:
+        return _finalize_lookup_many_results(rows, results)
+
+    manager = get_manager(cache_dir=cache_dir, allowed_iso2=allowed_iso2)
+    try:
+        global_lookup = manager.get_or_init_global_lookup()
+    except Exception:
+        for row in valid_rows:
+            results[row.index] = _lookup_many_output(
+                row.id,
+                _failed_output(state={"world": {"status": "failed", "classification": "unknown"}}),
             )
-        results.append({"id": point_id, "lookup": lookup_payload})
-    return results
+        return _finalize_lookup_many_results(rows, results)
+
+    resolved_rows: list[_ResolvedLookupRecord] = []
+    open_sea_rows: list[_OpenSeaLookupRecord] = []
+    for row in valid_rows:
+        try:
+            world_result = global_lookup.lookup(row.lat, row.lon)
+        except Exception:
+            results[row.index] = _lookup_many_output(
+                row.id,
+                _failed_output(state={"world": {"status": "failed", "classification": "unknown"}}),
+            )
+            continue
+
+        if not isinstance(world_result, dict):
+            results[row.index] = _lookup_many_output(
+                row.id,
+                _failed_output(state={"world": {"status": "failed", "classification": "unknown"}}),
+            )
+            continue
+
+        world_status = str(world_result.get("lookup_status", "failed"))
+        world_context = world_result.get("world_context")
+        world_state = _world_state_from_context(world_context, world_status=world_status)
+        if world_status != "ok":
+            results[row.index] = _lookup_many_output(row.id, _failed_output(state={"world": world_state}))
+            continue
+
+        iso2 = _extract_iso2(world_context)
+        if iso2 is None and world_state.get("classification") == "open_sea":
+            open_sea_rows.append(
+                _OpenSeaLookupRecord(
+                    index=row.index,
+                    id=row.id,
+                    lat=row.lat,
+                    lon=row.lon,
+                    world_state=world_state,
+                )
+            )
+            continue
+        if iso2 is None:
+            results[row.index] = _lookup_many_output(row.id, _failed_output(state={"world": world_state}))
+            continue
+
+        resolved_rows.append(
+            _ResolvedLookupRecord(
+                index=row.index,
+                id=row.id,
+                lat=row.lat,
+                lon=row.lon,
+                world_state=world_state,
+                iso2=iso2,
+            )
+        )
+
+    offshore_resolved_indexes: set[int] = set()
+    if open_sea_rows:
+        offshore_resolved = _resolve_open_sea_lookup_rows(
+            manager=manager,
+            rows=open_sea_rows,
+            cache_dir=cache_dir,
+        )
+        resolved_rows.extend(offshore_resolved)
+        offshore_resolved_indexes = {row.index for row in offshore_resolved}
+        for row in open_sea_rows:
+            if row.index not in offshore_resolved_indexes:
+                results[row.index] = _lookup_many_output(row.id, _failed_output(state={"world": row.world_state}))
+
+    by_iso2: dict[str, list[_ResolvedLookupRecord]] = {}
+    for row in resolved_rows:
+        by_iso2.setdefault(row.iso2, []).append(row)
+
+    for iso2 in sorted(by_iso2):
+        grouped_rows = sorted(by_iso2[iso2], key=lambda item: (item.lat, item.lon, item.id, item.index))
+        for index, payload in _lookup_country_rows(
+            manager=manager,
+            iso2=iso2,
+            rows=grouped_rows,
+            cache_dir=cache_dir,
+        ).items():
+            results[index] = _lookup_many_output(_lookup_many_point_id(rows[index], index), payload)
+
+    return _finalize_lookup_many_results(rows, results)
 
 
 def bootstrap(
