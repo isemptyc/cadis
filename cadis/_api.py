@@ -62,6 +62,13 @@ class _OpenSeaLookupRecord:
     world_state: WorldState
 
 
+@dataclass(frozen=True)
+class _OffshoreCandidateDataset:
+    iso2: str
+    scope_bbox: tuple[float, float, float, float]
+    expanded_bbox: tuple[float, float, float, float]
+
+
 @dataclass
 class _LookupManyDiagnostics:
     counters: dict[str, int] = field(default_factory=dict)
@@ -482,9 +489,30 @@ def _offshore_candidate_iso2(
     cache_dir: str | Path | None = None,
 ) -> list[str]:
     max_candidates = _env_int("CADIS_OFFSHORE_MAX_CANDIDATES", OFFSHORE_MAX_CANDIDATES)
-    margin_km = _env_float("CADIS_OFFSHORE_CANDIDATE_MARGIN_KM", OFFSHORE_CANDIDATE_MARGIN_KM)
 
     candidates: list[tuple[float, str]] = []
+    for candidate in _offshore_candidate_datasets(manager=manager, cache_dir=cache_dir):
+        distance_km = _point_to_bbox_distance_km(lat=lat, lon=lon, bbox=candidate.expanded_bbox)
+        if distance_km > 0.0:
+            continue
+        candidates.append(
+            (
+                _point_to_bbox_distance_km(lat=lat, lon=lon, bbox=candidate.scope_bbox),
+                candidate.iso2,
+            )
+        )
+
+    candidates.sort(key=lambda item: (item[0], item[1]))
+    return [iso2 for _, iso2 in candidates[:max_candidates]]
+
+
+def _offshore_candidate_datasets(
+    *,
+    manager: Any,
+    cache_dir: str | Path | None = None,
+) -> list[_OffshoreCandidateDataset]:
+    margin_km = _env_float("CADIS_OFFSHORE_CANDIDATE_MARGIN_KM", OFFSHORE_CANDIDATE_MARGIN_KM)
+    candidates: list[_OffshoreCandidateDataset] = []
     for iso2 in _installed_iso2_from_cache(cache_dir=cache_dir):
         if not manager.is_iso2_allowed(iso2):
             continue
@@ -501,18 +529,35 @@ def _offshore_candidate_iso2(
             continue
         if scope_bbox is None:
             continue
-
-        expanded = _expand_bbox_km(
-            scope_bbox,
-            distance_km=float(offshore_km) + margin_km,
+        candidates.append(
+            _OffshoreCandidateDataset(
+                iso2=iso2,
+                scope_bbox=scope_bbox,
+                expanded_bbox=_expand_bbox_km(
+                    scope_bbox,
+                    distance_km=float(offshore_km) + margin_km,
+                ),
+            )
         )
-        distance_km = _point_to_bbox_distance_km(lat=lat, lon=lon, bbox=expanded)
+    return sorted(candidates, key=lambda item: item.iso2)
+
+
+def _offshore_candidate_iso2_from_datasets(
+    *,
+    candidate_datasets: list[_OffshoreCandidateDataset],
+    lat: float,
+    lon: float,
+) -> list[str]:
+    max_candidates = _env_int("CADIS_OFFSHORE_MAX_CANDIDATES", OFFSHORE_MAX_CANDIDATES)
+    candidates: list[tuple[float, str]] = []
+    for candidate in candidate_datasets:
+        distance_km = _point_to_bbox_distance_km(lat=lat, lon=lon, bbox=candidate.expanded_bbox)
         if distance_km > 0.0:
             continue
         candidates.append(
             (
-                _point_to_bbox_distance_km(lat=lat, lon=lon, bbox=scope_bbox),
-                iso2,
+                _point_to_bbox_distance_km(lat=lat, lon=lon, bbox=candidate.scope_bbox),
+                candidate.iso2,
             )
         )
 
@@ -855,14 +900,17 @@ def _resolve_open_sea_lookup_rows(
     cache_dir: str | Path | None = None,
     diagnostics: _LookupManyDiagnostics | None = None,
 ) -> list[_ResolvedLookupRecord]:
+    candidate_datasets = _offshore_candidate_datasets(manager=manager, cache_dir=cache_dir)
+    if diagnostics is not None:
+        diagnostics.counters["offshore_candidate_dataset_count"] = len(candidate_datasets)
+
     candidate_iso2_by_index: dict[int, list[str]] = {}
     candidate_union: set[str] = set()
     for row in rows:
-        candidates = _offshore_candidate_iso2(
-            manager=manager,
+        candidates = _offshore_candidate_iso2_from_datasets(
+            candidate_datasets=candidate_datasets,
             lat=row.lat,
             lon=row.lon,
-            cache_dir=cache_dir,
         )
         candidate_iso2_by_index[row.index] = candidates
         candidate_union.update(candidates)
