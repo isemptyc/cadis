@@ -1055,18 +1055,29 @@ def _lookup_many_impl(
 
     resolved_rows: list[_ResolvedLookupRecord] = []
     open_sea_rows: list[_OpenSeaLookupRecord] = []
+    world_result_cache: dict[tuple[float, float], object] = {}
     world_start = time.perf_counter()
     for row in valid_rows:
-        try:
-            world_result = global_lookup.lookup(row.lat, row.lon)
-        except Exception:
-            results[row.index] = _lookup_many_output(
-                row.id,
-                _failed_output(state={"world": {"status": "failed", "classification": "unknown"}}),
-            )
+        cache_key = (row.lat, row.lon)
+        if cache_key in world_result_cache:
+            world_result = world_result_cache[cache_key]
             if diagnostics is not None:
-                diagnostics.inc("world_failed_rows")
-            continue
+                diagnostics.inc("world_cache_hits")
+        else:
+            try:
+                world_result = global_lookup.lookup(row.lat, row.lon)
+            except Exception:
+                results[row.index] = _lookup_many_output(
+                    row.id,
+                    _failed_output(state={"world": {"status": "failed", "classification": "unknown"}}),
+                )
+                if diagnostics is not None:
+                    diagnostics.inc("world_failed_rows")
+                    diagnostics.inc("world_cache_misses")
+                continue
+            world_result_cache[cache_key] = world_result
+            if diagnostics is not None:
+                diagnostics.inc("world_cache_misses")
 
         if not isinstance(world_result, dict):
             results[row.index] = _lookup_many_output(
@@ -1119,6 +1130,7 @@ def _lookup_many_impl(
         if diagnostics is not None:
             diagnostics.inc("direct_country_rows")
     if diagnostics is not None:
+        diagnostics.counters["world_cache_entries"] = len(world_result_cache)
         diagnostics.add_time("world_pass", time.perf_counter() - world_start)
 
     offshore_resolved_indexes: set[int] = set()
