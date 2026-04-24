@@ -69,7 +69,7 @@ out = sdk.classify_world(25.0330, 121.5654)
 ```python
 {
   "engine": "cadis",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "classification_status": "ok" | "failed",
   "state": {
     "input": {...},  # present only for invalid input
@@ -86,7 +86,7 @@ On successful world classification, `classification_status` is `ok` for both cou
 ```python
 {
   "engine": "cadis",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "classification_status": "ok",
   "state": {
     "world": {
@@ -112,7 +112,7 @@ Open sea and other terminal world regions are also successful classifications:
 ```python
 {
   "engine": "cadis",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "classification_status": "ok",
   "state": {
     "world": {
@@ -140,7 +140,7 @@ Open sea and other terminal world regions are also successful classifications:
 ```python
 {
   "engine": "cadis",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "execution": {
     "lookup_status": "ok" | "partial" | "failed",
     "resolution_state": (
@@ -329,7 +329,7 @@ cadis lookup 35.153557004399545 133.48428546061976 --json
 ```python
 {
   "engine": "cadis",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "execution": {"lookup_status": "ok", "resolution_state": "resolved"},
   "state": {
     "world": {"status": "ok", "classification": "country", "iso2": "JP"},
@@ -378,7 +378,7 @@ World resolved to a non-country region:
 ```python
 {
   "engine": "cadis",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "execution": {
     "lookup_status": "failed",
     "resolution_state": "terminal_non_country",
@@ -400,7 +400,7 @@ Invalid input:
 ```python
 {
   "engine": "cadis",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "execution": {
     "lookup_status": "failed",
     "resolution_state": "invalid_input",
@@ -418,7 +418,7 @@ Dataset missing:
 ```python
 {
   "engine": "cadis",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "execution": {
     "lookup_status": "failed",
     "resolution_state": "remediable_capability_gap",
@@ -437,7 +437,7 @@ Dataset blocked by policy:
 ```python
 {
   "engine": "cadis",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "execution": {
     "lookup_status": "failed",
     "resolution_state": "blocked_by_policy",
@@ -462,7 +462,7 @@ Dataset blocked by policy:
 ```python
 {
   "schema_version": "1",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "supported_iso2": ["JP", "TW"],
   "installed_iso2": ["JP"],
   "dataset_lockdown_enabled": False,
@@ -490,7 +490,7 @@ Important distinction:
 ```python
 {
   "schema_version": "1",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "supported_iso2": ["JP", "TW"],
   "installed_iso2": ["JP", "TW"],
   "dataset_lockdown_enabled": True,
@@ -572,7 +572,7 @@ Both methods return the same envelope shape:
 ```python
 {
   "engine": "cadis",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "bootstrap_status": "ready" | "failed",
   "state": {
     "input": {...},    # invalid ISO2 input
@@ -608,7 +608,7 @@ Successful bootstrap:
 ```python
 {
   "engine": "cadis",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "bootstrap_status": "ready",
   "state": {
     "dataset": {
@@ -632,7 +632,7 @@ Blocked by policy:
 ```python
 {
   "engine": "cadis",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "bootstrap_status": "failed",
   "state": {
     "dataset": {
@@ -649,7 +649,7 @@ Invalid input:
 ```python
 {
   "engine": "cadis",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "bootstrap_status": "failed",
   "state": {
     "input": {
@@ -716,7 +716,23 @@ Cadis loads country runtimes lazily. A normal country `lookup()` loads the selec
 
 `classify_world()` only runs world classification and never loads country runtimes.
 
-For open-sea/offshore points, `lookup()` may retry against already-loaded country runtimes to preserve nearby/offshore behavior, but it does not instantiate every installed country runtime just because those datasets exist on disk.
+For open-sea/offshore points, `lookup()` uses a deterministic lightweight candidate selector before loading country runtimes. Candidate selection reads dataset policy and country-scope bbox metadata, applies the active allowlist policy, expands country-scope bboxes by `offshore_max_distance_km` plus a safety margin, sorts candidates by point-to-bbox distance and ISO2, then loads only the bounded candidate set for the authoritative runtime offshore check.
+
+Candidate selection does not depend on which runtimes are already loaded, so open-sea attribution is independent of row order and warm/cold manager state.
+
+The default candidate safety margin is `5` km. Override with:
+
+```bash
+CADIS_OFFSHORE_CANDIDATE_MARGIN_KM=10
+```
+
+The default maximum candidate count is `5`. Override with:
+
+```bash
+CADIS_OFFSHORE_MAX_CANDIDATES=8
+```
+
+Increasing the candidate count favors recall at the cost of loading more country runtimes for open-sea/offshore points.
 
 For high-volume workloads, prefer:
 

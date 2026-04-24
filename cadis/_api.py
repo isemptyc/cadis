@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import math
+import os
 import re
+import struct
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Iterable
@@ -24,6 +28,8 @@ from .version import __version__
 SCHEMA_VERSION = "1"
 VERSION = __version__
 SUPPORTED_ISO2 = ["JP", "TW", "GB", "IT", "KR", "SE", "NO", "DK", "BE", "NL"]
+OFFSHORE_CANDIDATE_MARGIN_KM = 5.0
+OFFSHORE_MAX_CANDIDATES = 5
 
 
 def _infer_resolution_state(
@@ -119,6 +125,32 @@ def _installed_iso2_from_cache(cache_dir: str | Path | None = None) -> list[str]
     return sorted(set(iso2))
 
 
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if not isinstance(raw, str) or not raw.strip():
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    if not math.isfinite(value) or value < 0:
+        return default
+    return value
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if not isinstance(raw, str) or not raw.strip():
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    if value < 1:
+        return default
+    return value
+
+
 def _failed_output(
     *,
     state: LookupState,
@@ -204,28 +236,236 @@ def _world_state_from_context(world_context: Any, *, world_status: str) -> World
     }
 
 
-def _loaded_runtime_handles(
-    manager: Any,
+def _point_to_bbox_distance_km(
+    *,
+    lat: float,
+    lon: float,
+    bbox: tuple[float, float, float, float],
+) -> float:
+    minx, miny, maxx, maxy = bbox
+    clamped_lon = min(max(lon, minx), maxx)
+    clamped_lat = min(max(lat, miny), maxy)
+    if clamped_lon == lon and clamped_lat == lat:
+        return 0.0
+    lat1 = math.radians(lat)
+    lon1 = math.radians(lon)
+    lat2 = math.radians(clamped_lat)
+    lon2 = math.radians(clamped_lon)
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = (math.sin(dlat / 2) ** 2) + math.cos(lat1) * math.cos(lat2) * (
+        math.sin(dlon / 2) ** 2
+    )
+    return 6371.0 * 2 * math.asin(math.sqrt(a))
+
+
+def _expand_bbox_km(
+    bbox: tuple[float, float, float, float],
+    *,
+    distance_km: float,
+) -> tuple[float, float, float, float]:
+    minx, miny, maxx, maxy = bbox
+    lat_delta = distance_km / 111.0
+    expanded_miny = max(-90.0, miny - lat_delta)
+    expanded_maxy = min(90.0, maxy + lat_delta)
+    max_abs_lat = min(89.9, max(abs(expanded_miny), abs(expanded_maxy)))
+    cos_lat = max(0.01, math.cos(math.radians(max_abs_lat)))
+    lon_delta = distance_km / (111.0 * cos_lat)
+    return (
+        max(-180.0, minx - lon_delta),
+        expanded_miny,
+        min(180.0, maxx + lon_delta),
+        expanded_maxy,
+    )
+
+
+def _load_ffsf_feature_and_part_bboxes(
+    ffsf_path: Path,
+) -> tuple[list[tuple[int, int]], list[tuple[float, float, float, float]]]:
+    with ffsf_path.open("rb") as fh:
+        header = fh.read(16)
+        if len(header) < 16 or header[0:4] != b"FFSF":
+            raise ValueError("Invalid FFSF header")
+        version, feature_count, total_part_count = struct.unpack_from("<III", header, 4)
+        if version not in {2, 3}:
+            raise ValueError(f"Unsupported FFSF version {version}")
+
+        feature_index: list[tuple[int, int]] = []
+        for _ in range(feature_count):
+            raw = fh.read(16)
+            if len(raw) != 16:
+                raise ValueError("Invalid FFSF feature index")
+            _, _, part_start_idx, part_count = struct.unpack("<4I", raw)
+            feature_index.append((part_start_idx, part_count))
+
+        part_bboxes: list[tuple[float, float, float, float]] = []
+        for _ in range(total_part_count):
+            raw = fh.read(16)
+            if len(raw) != 16:
+                raise ValueError("Invalid FFSF part bbox table")
+            part_bboxes.append(struct.unpack("<4f", raw))
+
+    return feature_index, part_bboxes
+
+
+def _country_scope_bbox_from_dataset(dataset_dir: str | Path) -> tuple[float, float, float, float] | None:
+    root = Path(dataset_dir)
+    meta_path = root / "geometry_meta.json"
+    ffsf_path = root / "geometry.ffsf"
+    if not meta_path.exists() or not ffsf_path.exists():
+        return None
+
+    raw_meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    if not isinstance(raw_meta, list):
+        return None
+    feature_index, part_bboxes = _load_ffsf_feature_and_part_bboxes(ffsf_path)
+    if len(feature_index) != len(raw_meta):
+        return None
+
+    flagged_levels = [
+        meta.get("level")
+        for meta in raw_meta
+        if isinstance(meta, dict) and meta.get("country_scope_flag") is True and isinstance(meta.get("level"), int)
+    ]
+    target_level = min(flagged_levels) if flagged_levels else None
+    use_flagged_scope = target_level is not None
+
+    if target_level is None:
+        levels = [
+            meta.get("level")
+            for meta in raw_meta
+            if isinstance(meta, dict) and isinstance(meta.get("level"), int)
+        ]
+        if not levels:
+            return None
+        target_level = min(levels)
+
+    selected: list[tuple[float, float, float, float]] = []
+    for feature_idx, (part_start_idx, part_count) in enumerate(feature_index):
+        meta = raw_meta[feature_idx]
+        if not isinstance(meta, dict):
+            continue
+        if use_flagged_scope and meta.get("country_scope_flag") is not True:
+            continue
+        if meta.get("level") != target_level:
+            continue
+        for part_idx in range(part_start_idx, part_start_idx + part_count):
+            if 0 <= part_idx < len(part_bboxes):
+                selected.append(part_bboxes[part_idx])
+
+    if not selected:
+        return None
+    return (
+        min(b[0] for b in selected),
+        min(b[1] for b in selected),
+        max(b[2] for b in selected),
+        max(b[3] for b in selected),
+    )
+
+
+def _load_offshore_max_distance_km(dataset_dir: str | Path) -> float | None:
+    policy_path = Path(dataset_dir) / "runtime_policy.json"
+    raw = json.loads(policy_path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        return None
+    nearby_policy = raw.get("nearby_policy", {})
+    if nearby_policy is None:
+        nearby_policy = {}
+    if not isinstance(nearby_policy, dict):
+        return None
+    offshore = nearby_policy.get("offshore_max_distance_km", 20.0)
+    if offshore is None or not isinstance(offshore, (int, float)):
+        return None
+    offshore = float(offshore)
+    if not math.isfinite(offshore) or offshore <= 0:
+        return None
+    return offshore
+
+
+def _parse_version_for_sort(raw: str) -> tuple[int, ...]:
+    value = raw.strip()
+    if value.startswith("v"):
+        value = value[1:]
+    parts = value.split(".")
+    if not parts or any(not p.isdigit() for p in parts):
+        return tuple()
+    return tuple(int(p) for p in parts)
+
+
+def _latest_dataset_dir_for_iso2(
+    iso2: str,
     *,
     cache_dir: str | Path | None = None,
-) -> list[tuple[str, Any]]:
-    handles: list[tuple[str, Any]] = []
-    runtime_handles = getattr(manager, "_runtime_handles", {})
-    if not isinstance(runtime_handles, dict):
-        return handles
+) -> Path | None:
+    cache_root = resolve_cache_dir() if cache_dir is None else Path(cache_dir).expanduser()
+    versions_root = cache_root / iso2 / f"{iso2.lower()}.admin"
+    if not versions_root.exists() or not versions_root.is_dir():
+        return None
 
-    installed = set(_installed_iso2_from_cache(cache_dir=cache_dir))
-    for iso2, runtime_handle in runtime_handles.items():
-        if not isinstance(iso2, str):
+    candidates: list[tuple[tuple[int, ...], Path]] = []
+    for child in versions_root.iterdir():
+        if not child.is_dir():
             continue
-        normalized_iso2 = iso2.strip().upper()
-        if installed and normalized_iso2 not in installed:
+        parsed = _parse_version_for_sort(child.name)
+        if parsed:
+            candidates.append((parsed, child))
+    candidates.sort(reverse=True)
+    for _, dataset_dir in candidates:
+        required = [
+            "dataset_release_manifest.json",
+            "geometry.ffsf",
+            "geometry_meta.json",
+            "runtime_policy.json",
+        ]
+        if all((dataset_dir / name).exists() for name in required):
+            return dataset_dir
+    return None
+
+
+def _offshore_candidate_iso2(
+    *,
+    manager: Any,
+    lat: float,
+    lon: float,
+    cache_dir: str | Path | None = None,
+) -> list[str]:
+    max_candidates = _env_int("CADIS_OFFSHORE_MAX_CANDIDATES", OFFSHORE_MAX_CANDIDATES)
+    margin_km = _env_float("CADIS_OFFSHORE_CANDIDATE_MARGIN_KM", OFFSHORE_CANDIDATE_MARGIN_KM)
+
+    candidates: list[tuple[float, str]] = []
+    for iso2 in _installed_iso2_from_cache(cache_dir=cache_dir):
+        if not manager.is_iso2_allowed(iso2):
             continue
-        dataset_state = getattr(runtime_handle, "dataset_state", None)
-        if not isinstance(dataset_state, dict) or dataset_state.get("status") != "ready":
+        dataset_dir = _latest_dataset_dir_for_iso2(iso2, cache_dir=cache_dir)
+        if dataset_dir is None:
             continue
-        handles.append((normalized_iso2, runtime_handle))
-    return handles
+
+        try:
+            offshore_km = _load_offshore_max_distance_km(dataset_dir)
+            if offshore_km is None:
+                continue
+            scope_bbox = _country_scope_bbox_from_dataset(dataset_dir)
+        except Exception:
+            continue
+        if scope_bbox is None:
+            continue
+
+        expanded = _expand_bbox_km(
+            scope_bbox,
+            distance_km=float(offshore_km) + margin_km,
+        )
+        distance_km = _point_to_bbox_distance_km(lat=lat, lon=lon, bbox=expanded)
+        if distance_km > 0.0:
+            continue
+        candidates.append(
+            (
+                _point_to_bbox_distance_km(lat=lat, lon=lon, bbox=scope_bbox),
+                iso2,
+            )
+        )
+
+    candidates.sort(key=lambda item: (item[0], item[1]))
+    return [iso2 for _, iso2 in candidates[:max_candidates]]
 
 
 def _runtime_offshore_distance_km(runtime_handle: Any, *, lat: float, lon: float) -> float | None:
@@ -249,7 +489,7 @@ def _runtime_offshore_distance_km(runtime_handle: Any, *, lat: float, lon: float
     return float(geometry_index.distance_km_to_country_scope(pt))
 
 
-def _retry_open_sea_with_installed_runtime(
+def _retry_open_sea_with_candidate_runtime(
     *,
     manager: Any,
     lat: float,
@@ -257,7 +497,17 @@ def _retry_open_sea_with_installed_runtime(
     cache_dir: str | Path | None = None,
 ) -> tuple[str, Any] | None:
     nearest: tuple[float, str, Any] | None = None
-    for iso2, runtime_handle in _loaded_runtime_handles(manager, cache_dir=cache_dir):
+    for iso2 in _offshore_candidate_iso2(
+        manager=manager,
+        lat=lat,
+        lon=lon,
+        cache_dir=cache_dir,
+    ):
+        runtime_handle, dataset_state = manager.get_runtime_readiness(iso2, cache_dir=cache_dir)
+        if runtime_handle is None:
+            continue
+        if not isinstance(dataset_state, dict) or dataset_state.get("status") != "ready":
+            continue
         distance_km = _runtime_offshore_distance_km(runtime_handle, lat=lat, lon=lon)
         if distance_km is None:
             continue
@@ -345,7 +595,7 @@ def lookup(
 
     iso2 = _extract_iso2(world_context)
     if iso2 is None and world_state.get("classification") == "open_sea":
-        retried = _retry_open_sea_with_installed_runtime(
+        retried = _retry_open_sea_with_candidate_runtime(
             manager=manager,
             lat=float(lat),
             lon=float(lon),
