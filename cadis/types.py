@@ -26,6 +26,7 @@ CapabilityDetail = Literal[
 ]
 BootstrapStatus = Literal["ready", "failed"]
 StateStatus = Literal["ok", "failed", "missing", "invalid", "ready", "skipped", "blocked"]
+ClassificationStatus = Literal["ok", "failed"]
 
 
 class ExecutionOutcome(TypedDict, total=False):
@@ -64,6 +65,14 @@ class LookupResponse(TypedDict, total=False):
     engine: str
     version: str
     execution: ExecutionOutcome
+    state: LookupState
+    result: dict[str, object] | None
+
+
+class WorldClassificationResponse(TypedDict, total=False):
+    engine: str
+    version: str
+    classification_status: ClassificationStatus
     state: LookupState
     result: dict[str, object] | None
 

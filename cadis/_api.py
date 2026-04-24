@@ -10,7 +10,15 @@ from typing import Any, Callable, Iterable
 from ._cache import resolve_cache_dir
 from ._country_names import country_name_for_iso2
 from ._manager import get_manager
-from .types import BootstrapResponse, ExecutionOutcome, InfoResponse, LookupResponse, LookupState, WorldState
+from .types import (
+    BootstrapResponse,
+    ExecutionOutcome,
+    InfoResponse,
+    LookupResponse,
+    LookupState,
+    WorldClassificationResponse,
+    WorldState,
+)
 from .version import __version__
 
 SCHEMA_VERSION = "1"
@@ -125,6 +133,20 @@ def _failed_output(
     }
 
 
+def _failed_classification(
+    *,
+    state: LookupState,
+    result: dict[str, Any] | None = None,
+) -> WorldClassificationResponse:
+    return {
+        "engine": "cadis",
+        "version": VERSION,
+        "classification_status": "failed",
+        "state": state,
+        "result": result,
+    }
+
+
 def _extract_iso2(world_context: Any) -> str | None:
     if not isinstance(world_context, dict):
         return None
@@ -182,19 +204,27 @@ def _world_state_from_context(world_context: Any, *, world_status: str) -> World
     }
 
 
-def _ready_runtime_handles_from_cache(
+def _loaded_runtime_handles(
     manager: Any,
     *,
     cache_dir: str | Path | None = None,
 ) -> list[tuple[str, Any]]:
     handles: list[tuple[str, Any]] = []
-    for iso2 in _installed_iso2_from_cache(cache_dir=cache_dir):
-        runtime_handle, dataset_state = manager.get_runtime_readiness(iso2, cache_dir=cache_dir)
-        if runtime_handle is None:
+    runtime_handles = getattr(manager, "_runtime_handles", {})
+    if not isinstance(runtime_handles, dict):
+        return handles
+
+    installed = set(_installed_iso2_from_cache(cache_dir=cache_dir))
+    for iso2, runtime_handle in runtime_handles.items():
+        if not isinstance(iso2, str):
             continue
+        normalized_iso2 = iso2.strip().upper()
+        if installed and normalized_iso2 not in installed:
+            continue
+        dataset_state = getattr(runtime_handle, "dataset_state", None)
         if not isinstance(dataset_state, dict) or dataset_state.get("status") != "ready":
             continue
-        handles.append((iso2, runtime_handle))
+        handles.append((normalized_iso2, runtime_handle))
     return handles
 
 
@@ -227,7 +257,7 @@ def _retry_open_sea_with_installed_runtime(
     cache_dir: str | Path | None = None,
 ) -> tuple[str, Any] | None:
     nearest: tuple[float, str, Any] | None = None
-    for iso2, runtime_handle in _ready_runtime_handles_from_cache(manager, cache_dir=cache_dir):
+    for iso2, runtime_handle in _loaded_runtime_handles(manager, cache_dir=cache_dir):
         distance_km = _runtime_offshore_distance_km(runtime_handle, lat=lat, lon=lon)
         if distance_km is None:
             continue
@@ -244,6 +274,44 @@ def _retry_open_sea_with_installed_runtime(
     if nearest is None:
         return None
     return nearest[1], nearest[2]
+
+
+def classify_world(
+    lat: float,
+    lon: float,
+    *,
+    cache_dir: str | Path | None = None,
+    allowed_iso2: Iterable[str] | None = None,
+) -> WorldClassificationResponse:
+    if not isinstance(lat, (float, int)) or not isinstance(lon, (float, int)):
+        return _failed_classification(state={"input": {"status": "invalid"}})
+    if lat < -90 or lat > 90 or lon < -180 or lon > 180:
+        return _failed_classification(state={"input": {"status": "invalid"}})
+
+    manager = get_manager(cache_dir=cache_dir, allowed_iso2=allowed_iso2)
+    try:
+        global_lookup = manager.get_or_init_global_lookup()
+        world_result = global_lookup.lookup(float(lat), float(lon))
+    except Exception:
+        return _failed_classification(state={"world": {"status": "failed", "classification": "unknown"}})
+
+    if not isinstance(world_result, dict):
+        return _failed_classification(state={"world": {"status": "failed", "classification": "unknown"}})
+
+    world_status = str(world_result.get("lookup_status", "failed"))
+    world_context = world_result.get("world_context")
+    world_state = _world_state_from_context(world_context, world_status=world_status)
+
+    if world_status != "ok":
+        return _failed_classification(state={"world": world_state})
+
+    return {
+        "engine": "cadis",
+        "version": VERSION,
+        "classification_status": "ok",
+        "state": {"world": world_state},
+        "result": {"world": dict(world_state)},
+    }
 
 
 def lookup(

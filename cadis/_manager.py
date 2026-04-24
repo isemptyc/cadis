@@ -107,11 +107,19 @@ class CadisManager:
         return self._dataset_policy.allows(iso2)
 
     def get_or_init_global_lookup(self):
+        global _SHARED_GLOBAL_LOOKUP
+
         if self._global_lookup is not None:
+            return self._global_lookup
+        if _SHARED_GLOBAL_LOOKUP is not None:
+            self._global_lookup = _SHARED_GLOBAL_LOOKUP
             return self._global_lookup
 
         with self._lock:
             if self._global_lookup is not None:
+                return self._global_lookup
+            if _SHARED_GLOBAL_LOOKUP is not None:
+                self._global_lookup = _SHARED_GLOBAL_LOOKUP
                 return self._global_lookup
 
             try:
@@ -119,10 +127,13 @@ class CadisManager:
             except Exception as exc:  # pragma: no cover - exercised via tests with import stubs
                 raise ImportError(normalize_reason(exc)) from None
 
-            try:
-                self._global_lookup = GlobalLookup.from_defaults()
-            except Exception as exc:
-                raise RuntimeError(normalize_reason(exc)) from None
+            with _SHARED_GLOBAL_LOOKUP_LOCK:
+                if _SHARED_GLOBAL_LOOKUP is None:
+                    try:
+                        _SHARED_GLOBAL_LOOKUP = GlobalLookup.from_defaults()
+                    except Exception as exc:
+                        raise RuntimeError(normalize_reason(exc)) from None
+                self._global_lookup = _SHARED_GLOBAL_LOOKUP
 
             return self._global_lookup
 
@@ -337,6 +348,9 @@ class CadisManager:
             "dataset": install_state,
         }
 
+
+_SHARED_GLOBAL_LOOKUP: Any | None = None
+_SHARED_GLOBAL_LOOKUP_LOCK = threading.Lock()
 
 _MANAGERS: dict[tuple[str, tuple[str, ...]], CadisManager] = {}
 _MANAGERS_LOCK = threading.Lock()

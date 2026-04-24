@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable
 
-from ._api import bootstrap, info, lookup, reinstall
-from .types import BootstrapResponse, InfoResponse, LookupResponse
+from ._api import bootstrap, classify_world, info, lookup, reinstall
+from .types import BootstrapResponse, InfoResponse, LookupResponse, WorldClassificationResponse
 
 
 class CadisSDK:
@@ -39,6 +39,21 @@ class CadisSDK:
         allowed_iso2: Iterable[str] | None = None,
     ) -> LookupResponse:
         return lookup(
+            lat,
+            lon,
+            cache_dir=self._cache_dir_or_default(cache_dir),
+            allowed_iso2=self._allowed_iso2_or_default(allowed_iso2),
+        )
+
+    def classify_world(
+        self,
+        lat: float,
+        lon: float,
+        *,
+        cache_dir: str | Path | None = None,
+        allowed_iso2: Iterable[str] | None = None,
+    ) -> WorldClassificationResponse:
+        return classify_world(
             lat,
             lon,
             cache_dir=self._cache_dir_or_default(cache_dir),
