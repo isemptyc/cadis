@@ -62,19 +62,14 @@ def _select_rows(rows: list[dict[str, Any]], *, sample_size: int | None, seed: i
     return [rows[index] for index in indexes]
 
 
-def _compare_lookup_many(*, rows: list[dict[str, Any]], batch_size: int, seed: int) -> dict[str, Any]:
-    points = [{"id": row["id"], "lat": row["lat"], "lon": row["lon"]} for row in rows]
-    single_by_id: dict[str, str] = {}
-    single_status: Counter[tuple[object, object, object, object]] = Counter()
-
-    single_start = time.perf_counter()
-    for point in points:
-        payload = cadis.lookup(point["lat"], point["lon"])
-        single_by_id[str(point["id"])] = _canonical(payload)
+def _status_distribution(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    counter: Counter[tuple[object, object, object, object]] = Counter()
+    for item in items:
+        payload = item.get("lookup") if isinstance(item, dict) else {}
         execution = payload.get("execution") if isinstance(payload, dict) else {}
         state = payload.get("state") if isinstance(payload, dict) else {}
         world = state.get("world") if isinstance(state, dict) else {}
-        single_status[
+        counter[
             (
                 execution.get("lookup_status") if isinstance(execution, dict) else None,
                 execution.get("resolution_state") if isinstance(execution, dict) else None,
@@ -82,7 +77,29 @@ def _compare_lookup_many(*, rows: list[dict[str, Any]], batch_size: int, seed: i
                 world.get("iso2") if isinstance(world, dict) else None,
             )
         ] += 1
-    single_elapsed = time.perf_counter() - single_start
+    return [
+        {"status": list(key), "count": count}
+        for key, count in counter.most_common(20)
+    ]
+
+
+def _compare_lookup_many(
+    *,
+    rows: list[dict[str, Any]],
+    batch_size: int,
+    seed: int,
+    batch_only: bool,
+) -> dict[str, Any]:
+    points = [{"id": row["id"], "lat": row["lat"], "lon": row["lon"]} for row in rows]
+    single_by_id: dict[str, str] = {}
+    single_elapsed: float | None = None
+
+    if not batch_only:
+        single_start = time.perf_counter()
+        for point in points:
+            payload = cadis.lookup(point["lat"], point["lon"])
+            single_by_id[str(point["id"])] = _canonical(payload)
+        single_elapsed = time.perf_counter() - single_start
 
     batch_start = time.perf_counter()
     batch_report = cadis_api._lookup_many_with_diagnostics(points)
@@ -91,11 +108,12 @@ def _compare_lookup_many(*, rows: list[dict[str, Any]], batch_size: int, seed: i
 
     compare_start = time.perf_counter()
     batch_mismatches = []
-    for item in batch_all:
-        if _canonical(item.get("lookup")) != single_by_id.get(str(item.get("id"))):
-            batch_mismatches.append(str(item.get("id")))
-            if len(batch_mismatches) >= 10:
-                break
+    if not batch_only:
+        for item in batch_all:
+            if _canonical(item.get("lookup")) != single_by_id.get(str(item.get("id"))):
+                batch_mismatches.append(str(item.get("id")))
+                if len(batch_mismatches) >= 10:
+                    break
     batch_compare_elapsed = time.perf_counter() - compare_start
 
     chunk_start = time.perf_counter()
@@ -120,10 +138,15 @@ def _compare_lookup_many(*, rows: list[dict[str, Any]], batch_size: int, seed: i
     shuffle_elapsed = time.perf_counter() - shuffle_start
     shuffle_compare_start = time.perf_counter()
     shuffled_by_id = {str(item["id"]): _canonical(item["lookup"]) for item in shuffled_out}
+    reference_by_id = (
+        single_by_id
+        if not batch_only
+        else {str(item["id"]): _canonical(item["lookup"]) for item in batch_all}
+    )
     shuffle_mismatches = [
         str(point["id"])
         for point in points
-        if shuffled_by_id[str(point["id"])] != single_by_id[str(point["id"])]
+        if shuffled_by_id[str(point["id"])] != reference_by_id[str(point["id"])]
     ][:10]
     shuffle_compare_elapsed = time.perf_counter() - shuffle_compare_start
 
@@ -131,7 +154,8 @@ def _compare_lookup_many(*, rows: list[dict[str, Any]], batch_size: int, seed: i
         "cadis_version": cadis.__version__,
         "rows": len(points),
         "batch_size": batch_size,
-        "single_elapsed_sec": round(single_elapsed, 3),
+        "mode": "batch_only" if batch_only else "full_parity",
+        "single_elapsed_sec": None if single_elapsed is None else round(single_elapsed, 3),
         "batch_all_elapsed_sec": round(batch_elapsed, 3),
         "batch_compare_elapsed_sec": round(batch_compare_elapsed, 3),
         "chunked_elapsed_sec": round(chunk_elapsed, 3),
@@ -142,11 +166,9 @@ def _compare_lookup_many(*, rows: list[dict[str, Any]], batch_size: int, seed: i
         "maxrss_kb": int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss),
         "batch_all_vs_single_mismatch_ids": batch_mismatches,
         "chunked_vs_all_mismatch_ids": chunk_mismatches,
-        "shuffled_vs_single_mismatch_ids": shuffle_mismatches,
-        "status_distribution_top20": [
-            {"status": list(key), "count": count}
-            for key, count in single_status.most_common(20)
-        ],
+        "shuffled_vs_single_mismatch_ids": [] if batch_only else shuffle_mismatches,
+        "shuffled_vs_reference_mismatch_ids": shuffle_mismatches,
+        "status_distribution_top20": _status_distribution(batch_all),
     }
 
 
@@ -156,6 +178,11 @@ def main() -> int:
     parser.add_argument("--sample-size", type=int, default=3000)
     parser.add_argument("--all", action="store_true", help="Use every GPS row in the DB.")
     parser.add_argument("--batch-size", type=int, default=500)
+    parser.add_argument(
+        "--batch-only",
+        action="store_true",
+        help="Skip row-by-row lookup() parity and compare lookup_many() batch shapes only.",
+    )
     parser.add_argument("--seed", type=int, default=20260424)
     args = parser.parse_args()
 
@@ -168,7 +195,12 @@ def main() -> int:
     sample_size = None if args.all else max(1, int(args.sample_size))
     rows = _select_rows(all_rows, sample_size=sample_size, seed=args.seed)
     persisted_distribution = Counter((row["persisted_class"], row["persisted_iso2"]) for row in rows)
-    result = _compare_lookup_many(rows=rows, batch_size=args.batch_size, seed=args.seed)
+    result = _compare_lookup_many(
+        rows=rows,
+        batch_size=args.batch_size,
+        seed=args.seed,
+        batch_only=args.batch_only,
+    )
     result["gps_rows_total"] = len(all_rows)
     result["persisted_distribution_top20"] = [
         {"persisted": list(key), "count": count}
@@ -179,7 +211,7 @@ def main() -> int:
     if (
         result["batch_all_vs_single_mismatch_ids"]
         or result["chunked_vs_all_mismatch_ids"]
-        or result["shuffled_vs_single_mismatch_ids"]
+        or result["shuffled_vs_reference_mismatch_ids"]
     ):
         return 1
     return 0
