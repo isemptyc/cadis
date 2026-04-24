@@ -36,6 +36,7 @@ sdk = CadisSDK(
 This context is used by:
 
 - `sdk.lookup(...)`
+- `sdk.classify_world(...)`
 - `sdk.info()`
 - `sdk.bootstrap(...)`
 - `sdk.reinstall(...)`
@@ -44,6 +45,7 @@ You can also override the context per call:
 
 ```python
 sdk.lookup(35.68, 139.76, cache_dir="/tmp/alternate-cache")
+sdk.classify_world(35.68, 139.76, allowed_iso2=["JP"])
 sdk.info(allowed_iso2=["TW"])
 ```
 
@@ -54,6 +56,83 @@ Precedence rules:
 3. environment defaults such as `CADIS_CACHE_DIR` and `CADIS_ALLOWED_ISO2`
 4. platform default cache resolution
 
+## `classify_world()` Return Value
+
+Use `classify_world()` when you only need world/country classification and do not want to load a country runtime dataset.
+
+```python
+out = sdk.classify_world(25.0330, 121.5654)
+```
+
+`classify_world()` returns a dictionary with this top-level shape:
+
+```python
+{
+  "engine": "cadis",
+  "version": "0.5.0",
+  "classification_status": "ok" | "failed",
+  "state": {
+    "input": {...},  # present only for invalid input
+    "world": {...},  # world-resolution status
+  },
+  "result": {
+    "world": {...}
+  } | None
+}
+```
+
+On successful world classification, `classification_status` is `ok` for both country and non-country classifications. For example:
+
+```python
+{
+  "engine": "cadis",
+  "version": "0.5.0",
+  "classification_status": "ok",
+  "state": {
+    "world": {
+      "status": "ok",
+      "classification": "country",
+      "iso2": "TW",
+      "name": "Taiwan"
+    }
+  },
+  "result": {
+    "world": {
+      "status": "ok",
+      "classification": "country",
+      "iso2": "TW",
+      "name": "Taiwan"
+    }
+  }
+}
+```
+
+Open sea and other terminal world regions are also successful classifications:
+
+```python
+{
+  "engine": "cadis",
+  "version": "0.5.0",
+  "classification_status": "ok",
+  "state": {
+    "world": {
+      "status": "ok",
+      "classification": "open_sea",
+      "name": "South Atlantic Ocean"
+    }
+  },
+  "result": {
+    "world": {
+      "status": "ok",
+      "classification": "open_sea",
+      "name": "South Atlantic Ocean"
+    }
+  }
+}
+```
+
+`classify_world()` does not inspect, install, bootstrap, or load country datasets. Use it before `lookup()` when a caller wants to group or filter many points by world ISO2 without warming country runtimes.
+
 ## `lookup()` Return Value
 
 `lookup()` returns a dictionary with this top-level shape:
@@ -61,7 +140,7 @@ Precedence rules:
 ```python
 {
   "engine": "cadis",
-  "version": "0.3.3",
+  "version": "0.5.0",
   "execution": {
     "lookup_status": "ok" | "partial" | "failed",
     "resolution_state": (
@@ -250,7 +329,7 @@ cadis lookup 35.153557004399545 133.48428546061976 --json
 ```python
 {
   "engine": "cadis",
-  "version": "0.3.3",
+  "version": "0.5.0",
   "execution": {"lookup_status": "ok", "resolution_state": "resolved"},
   "state": {
     "world": {"status": "ok", "classification": "country", "iso2": "JP"},
@@ -299,7 +378,7 @@ World resolved to a non-country region:
 ```python
 {
   "engine": "cadis",
-  "version": "0.3.3",
+  "version": "0.5.0",
   "execution": {
     "lookup_status": "failed",
     "resolution_state": "terminal_non_country",
@@ -321,7 +400,7 @@ Invalid input:
 ```python
 {
   "engine": "cadis",
-  "version": "0.3.3",
+  "version": "0.5.0",
   "execution": {
     "lookup_status": "failed",
     "resolution_state": "invalid_input",
@@ -339,7 +418,7 @@ Dataset missing:
 ```python
 {
   "engine": "cadis",
-  "version": "0.3.3",
+  "version": "0.5.0",
   "execution": {
     "lookup_status": "failed",
     "resolution_state": "remediable_capability_gap",
@@ -358,7 +437,7 @@ Dataset blocked by policy:
 ```python
 {
   "engine": "cadis",
-  "version": "0.3.3",
+  "version": "0.5.0",
   "execution": {
     "lookup_status": "failed",
     "resolution_state": "blocked_by_policy",
@@ -383,7 +462,7 @@ Dataset blocked by policy:
 ```python
 {
   "schema_version": "1",
-  "version": "0.3.0",
+  "version": "0.5.0",
   "supported_iso2": ["JP", "TW"],
   "installed_iso2": ["JP"],
   "dataset_lockdown_enabled": False,
@@ -411,7 +490,7 @@ Important distinction:
 ```python
 {
   "schema_version": "1",
-  "version": "0.3.0",
+  "version": "0.5.0",
   "supported_iso2": ["JP", "TW"],
   "installed_iso2": ["JP", "TW"],
   "dataset_lockdown_enabled": True,
@@ -424,6 +503,7 @@ Important distinction:
 Cadis keeps lookup execution and dataset installation separate on purpose:
 
 - `lookup()` does not install or repair datasets.
+- `classify_world()` does not inspect or load country datasets.
 - `bootstrap()` installs or reuses a dataset so it becomes ready for lookup.
 - `reinstall()` is the explicit "replace or refresh" path.
 
@@ -492,7 +572,7 @@ Both methods return the same envelope shape:
 ```python
 {
   "engine": "cadis",
-  "version": "0.3.0",
+  "version": "0.5.0",
   "bootstrap_status": "ready" | "failed",
   "state": {
     "input": {...},    # invalid ISO2 input
@@ -528,7 +608,7 @@ Successful bootstrap:
 ```python
 {
   "engine": "cadis",
-  "version": "0.3.0",
+  "version": "0.5.0",
   "bootstrap_status": "ready",
   "state": {
     "dataset": {
@@ -552,7 +632,7 @@ Blocked by policy:
 ```python
 {
   "engine": "cadis",
-  "version": "0.3.0",
+  "version": "0.5.0",
   "bootstrap_status": "failed",
   "state": {
     "dataset": {
@@ -569,7 +649,7 @@ Invalid input:
 ```python
 {
   "engine": "cadis",
-  "version": "0.3.0",
+  "version": "0.5.0",
   "bootstrap_status": "failed",
   "state": {
     "input": {
@@ -583,7 +663,7 @@ Invalid input:
 
 Cadis resolves the cache root in this order:
 
-1. `cache_dir=` argument passed to `lookup()`, `info()`, `bootstrap()`, or `reinstall()`
+1. `cache_dir=` argument passed to `lookup()`, `classify_world()`, `info()`, `bootstrap()`, or `reinstall()`
 2. `CadisSDK(cache_dir=...)` constructor default
 3. `CADIS_CACHE_DIR` environment variable
 4. platform default from `platformdirs`
@@ -591,7 +671,7 @@ Cadis resolves the cache root in this order:
 
 Cadis resolves the dataset allowlist in this order:
 
-1. `allowed_iso2=` argument passed to `lookup()`, `info()`, `bootstrap()`, or `reinstall()`
+1. `allowed_iso2=` argument passed to `lookup()`, `classify_world()`, `info()`, `bootstrap()`, or `reinstall()`
 2. `CadisSDK(allowed_iso2=...)` constructor default
 3. `CADIS_ALLOWED_ISO2` environment variable
 4. no lockdown policy
@@ -619,15 +699,36 @@ This installs the dataset under a country/dataset/version layout:
 
 Important distinction:
 
-- `cache_dir` affects `lookup()`, `info()`, `bootstrap()`, and `reinstall()`.
-- `allowed_iso2` affects `lookup()`, `info()`, `bootstrap()`, and `reinstall()`.
-- runtime caching is isolated by context, so two SDK instances can safely use different cache roots in one process.
+- `cache_dir` affects `lookup()`, `classify_world()`, `info()`, `bootstrap()`, and `reinstall()`.
+- `allowed_iso2` affects `lookup()`, `classify_world()`, `info()`, `bootstrap()`, and `reinstall()`.
+- country runtime caching is isolated by context, so two SDK instances can safely use different cache roots in one process.
+- the world resolver is shared across manager contexts in the same process.
 
 That means a caller can safely create multiple isolated Cadis SDK contexts in one process. In practice, use one of these patterns:
 
 - set a stable `cache_dir` on the SDK instance
 - use per-call overrides only when you explicitly want to switch context
 - keep environment variables as compatibility defaults rather than the primary control surface
+
+### Runtime Loading Behavior
+
+Cadis loads country runtimes lazily. A normal country `lookup()` loads the selected ISO2 runtime when that dataset is ready and not already resident in the active context.
+
+`classify_world()` only runs world classification and never loads country runtimes.
+
+For open-sea/offshore points, `lookup()` may retry against already-loaded country runtimes to preserve nearby/offshore behavior, but it does not instantiate every installed country runtime just because those datasets exist on disk.
+
+For high-volume workloads, prefer:
+
+```python
+world = sdk.classify_world(lat, lon)
+iso2 = world.get("state", {}).get("world", {}).get("iso2")
+
+if iso2:
+    out = sdk.lookup(lat, lon)
+```
+
+Batch callers can use `classify_world()` first to group or filter points before performing administrative lookups.
 
 ### Installation Examples
 
