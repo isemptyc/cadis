@@ -16,5 +16,11 @@ dist/
 build/
 *.egg-info/
 
+# Rust / native extension builds
+target/
+native/**/target/
+native/**/dist/
+native/**/*.whl
+
 # Unittests
 tests/
