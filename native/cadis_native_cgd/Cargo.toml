@@ -1,0 +1,12 @@
+[package]
+name = "cadis_native_cgd"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[lib]
+name = "cadis_native_cgd"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.22.6", features = ["extension-module"] }

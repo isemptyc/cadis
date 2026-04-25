@@ -1,0 +1,14 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "cadis-native-cgd"
+version = "0.1.0"
+description = "Optional native CGD world kernel for Cadis runtimes."
+requires-python = ">=3.9"
+license = { text = "Apache-2.0" }
+
+[tool.maturin]
+module-name = "cadis_native_cgd"
+features = ["pyo3/extension-module"]
