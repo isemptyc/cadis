@@ -95,6 +95,8 @@ class CGDReader:
         self._polygons = self._load_all(self._path.read_bytes())
 
     def lookup(self, lon: float, lat: float) -> Optional[dict]:
+        if not (-180.0 <= lon <= 180.0 and -90.0 <= lat <= 90.0):
+            return None
         generic_ocean_labels = {"ocean", "open sea"}
         first_hit: Optional[dict] = None
         best_named_ocean: Optional[dict] = None
@@ -141,6 +143,13 @@ class CGDReader:
         if best_named_ocean is not None:
             return best_named_ocean
         return first_hit
+
+    def lookup_many_lons_lats(self, lons: object, lats: object) -> list[Optional[dict]]:
+        lon_values = list(lons)  # type: ignore[arg-type]
+        lat_values = list(lats)  # type: ignore[arg-type]
+        if len(lon_values) != len(lat_values):
+            raise ValueError("lons and lats must have the same length")
+        return [self.lookup(float(lon), float(lat)) for lon, lat in zip(lon_values, lat_values)]
 
     def _load_all(self, data: bytes) -> list[_PolygonRec]:
         if len(data) < HEADER_STRUCT.size:

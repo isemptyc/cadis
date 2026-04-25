@@ -1057,28 +1057,8 @@ def _lookup_many_impl(
     open_sea_rows: list[_OpenSeaLookupRecord] = []
     world_result_cache: dict[tuple[float, float], object] = {}
     world_start = time.perf_counter()
-    for row in valid_rows:
-        cache_key = (row.lat, row.lon)
-        if cache_key in world_result_cache:
-            world_result = world_result_cache[cache_key]
-            if diagnostics is not None:
-                diagnostics.inc("world_cache_hits")
-        else:
-            try:
-                world_result = global_lookup.lookup(row.lat, row.lon)
-            except Exception:
-                results[row.index] = _lookup_many_output(
-                    row.id,
-                    _failed_output(state={"world": {"status": "failed", "classification": "unknown"}}),
-                )
-                if diagnostics is not None:
-                    diagnostics.inc("world_failed_rows")
-                    diagnostics.inc("world_cache_misses")
-                continue
-            world_result_cache[cache_key] = world_result
-            if diagnostics is not None:
-                diagnostics.inc("world_cache_misses")
 
+    def process_world_result(row: _LookupManyRecord, world_result: object) -> None:
         if not isinstance(world_result, dict):
             results[row.index] = _lookup_many_output(
                 row.id,
@@ -1086,7 +1066,7 @@ def _lookup_many_impl(
             )
             if diagnostics is not None:
                 diagnostics.inc("world_failed_rows")
-            continue
+            return
 
         world_status = str(world_result.get("lookup_status", "failed"))
         world_context = world_result.get("world_context")
@@ -1095,7 +1075,7 @@ def _lookup_many_impl(
             results[row.index] = _lookup_many_output(row.id, _failed_output(state={"world": world_state}))
             if diagnostics is not None:
                 diagnostics.inc("world_failed_rows")
-            continue
+            return
 
         iso2 = _extract_iso2(world_context)
         if iso2 is None and world_state.get("classification") == "open_sea":
@@ -1110,12 +1090,12 @@ def _lookup_many_impl(
             )
             if diagnostics is not None:
                 diagnostics.inc("open_sea_rows")
-            continue
+            return
         if iso2 is None:
             results[row.index] = _lookup_many_output(row.id, _failed_output(state={"world": world_state}))
             if diagnostics is not None:
                 diagnostics.inc("terminal_non_country_rows")
-            continue
+            return
 
         resolved_rows.append(
             _ResolvedLookupRecord(
@@ -1129,8 +1109,71 @@ def _lookup_many_impl(
         )
         if diagnostics is not None:
             diagnostics.inc("direct_country_rows")
+
+    if hasattr(global_lookup, "lookup_many_lons_lats"):
+        unique_keys: list[tuple[float, float]] = []
+        key_to_unique_index: dict[tuple[float, float], int] = {}
+        for row in valid_rows:
+            cache_key = (row.lat, row.lon)
+            if cache_key in key_to_unique_index:
+                if diagnostics is not None:
+                    diagnostics.inc("world_cache_hits")
+                continue
+            key_to_unique_index[cache_key] = len(unique_keys)
+            unique_keys.append(cache_key)
+            if diagnostics is not None:
+                diagnostics.inc("world_cache_misses")
+
+        try:
+            batch_results = global_lookup.lookup_many_lons_lats(
+                [lon for _lat, lon in unique_keys],
+                [lat for lat, _lon in unique_keys],
+            )
+            if len(batch_results) != len(unique_keys):
+                raise ValueError("batch world lookup returned an unexpected number of results")
+        except Exception:
+            for row in valid_rows:
+                results[row.index] = _lookup_many_output(
+                    row.id,
+                    _failed_output(state={"world": {"status": "failed", "classification": "unknown"}}),
+                )
+                if diagnostics is not None:
+                    diagnostics.inc("world_failed_rows")
+        else:
+            for key, world_result in zip(unique_keys, batch_results):
+                world_result_cache[key] = world_result
+            for row in valid_rows:
+                process_world_result(row, world_result_cache[(row.lat, row.lon)])
+    else:
+        for row in valid_rows:
+            cache_key = (row.lat, row.lon)
+            if cache_key in world_result_cache:
+                world_result = world_result_cache[cache_key]
+                if diagnostics is not None:
+                    diagnostics.inc("world_cache_hits")
+            else:
+                try:
+                    world_result = global_lookup.lookup(row.lat, row.lon)
+                except Exception:
+                    results[row.index] = _lookup_many_output(
+                        row.id,
+                        _failed_output(state={"world": {"status": "failed", "classification": "unknown"}}),
+                    )
+                    if diagnostics is not None:
+                        diagnostics.inc("world_failed_rows")
+                        diagnostics.inc("world_cache_misses")
+                    continue
+                world_result_cache[cache_key] = world_result
+                if diagnostics is not None:
+                    diagnostics.inc("world_cache_misses")
+            process_world_result(row, world_result)
+
     if diagnostics is not None:
         diagnostics.counters["world_cache_entries"] = len(world_result_cache)
+        diagnostics.counters["world_backend_batch"] = int(hasattr(global_lookup, "lookup_many_lons_lats"))
+        backend_name = getattr(global_lookup, "backend_name", None)
+        if isinstance(backend_name, str) and backend_name:
+            diagnostics.counters[f"world_backend_{backend_name}"] = 1
         diagnostics.add_time("world_pass", time.perf_counter() - world_start)
 
     offshore_resolved_indexes: set[int] = set()
