@@ -5,8 +5,8 @@
   "release_channel": "production",
   "source_dataset_manifest_url": "https://raw.githubusercontent.com/isemptyc/cadis-dataset/main/releases/dataset_manifest.json",
   "source_dataset_manifest_generated_at": "2026-04-24T17:23:07Z",
-  "updated_at": "2026-04-25T13:20:04Z",
-  "cadis_version": "0.5.3",
+  "updated_at": "2026-04-25T15:07:33Z",
+  "cadis_version": "0.6.0",
   "datasets": {
     "JP": "v1.0.2",
     "TW": "v1.0.5",
