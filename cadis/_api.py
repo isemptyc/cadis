@@ -30,7 +30,11 @@ from .version import __version__
 
 SCHEMA_VERSION = "1"
 VERSION = __version__
-SUPPORTED_ISO2 = ["JP", "TW", "GB", "IT", "KR", "SE", "NO", "DK", "BE", "NL", "FR", "DE", "ES", "PT", "FI"]
+SUPPORTED_ISO2 = ["JP", "TW", "GB", "IT", "KR", "SE", "NO", "DK", "BE", "NL", "FR", "DE", "ES", "PT", "FI", "US"]
+DATASET_ISO2_ALIASES = {
+    "PR": "US",
+    "VI": "US",
+}
 OFFSHORE_CANDIDATE_MARGIN_KM = 5.0
 OFFSHORE_MAX_CANDIDATES = 5
 
@@ -247,7 +251,8 @@ def _extract_iso2(world_context: Any) -> str | None:
     iso2 = country.get("iso2")
     if not isinstance(iso2, str) or len(iso2.strip()) != 2:
         return None
-    return iso2.strip().upper()
+    normalized = iso2.strip().upper()
+    return DATASET_ISO2_ALIASES.get(normalized, normalized)
 
 
 def _world_state_from_context(world_context: Any, *, world_status: str) -> WorldState:
