@@ -127,6 +127,10 @@ class CadisLookupPipeline:
             for level, path in evidence_paths:
                 path_ids = {node.id for node in path}
                 evidence_node = path[0]
+                same_branch = branch_index.same_explicit_branch(candidate, evidence_node)
+                if same_branch is False:
+                    compatible = False
+                    break
                 if level > parent_level and candidate.id not in path_ids:
                     compatible = False
                     break

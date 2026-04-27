@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import hashlib
+import json
+from pathlib import Path
 from types import SimpleNamespace
 
-from cadis.runtime.dataset.loader import HierarchyBranchIndex, HierarchyBranchNode
+from cadis.runtime.dataset.loader import (
+    HierarchyBranchIndex,
+    HierarchyBranchNode,
+    load_hierarchy_branch_index,
+)
 from cadis.runtime.execution.pipeline import CadisLookupPipeline
 
 
@@ -39,6 +46,55 @@ def _index(nodes: list[HierarchyBranchNode]) -> HierarchyBranchIndex:
     )
 
 
+def _branch_node(
+    node_id: str,
+    level: int,
+    name: str,
+    parent_id: str | None,
+    path_ids: tuple[str, ...],
+    *,
+    branch_id: str,
+) -> HierarchyBranchNode:
+    path_signature = hashlib.sha256("\x1f".join(path_ids).encode("utf-8")).hexdigest()
+    return HierarchyBranchNode(
+        node_id,
+        level,
+        name,
+        parent_id,
+        None,
+        root_id=path_ids[0],
+        branch_id=branch_id,
+        path_ids=path_ids,
+        path_signature=path_signature,
+    )
+
+
+def _explicit_index(nodes: list[HierarchyBranchNode]) -> HierarchyBranchIndex:
+    base = _index(nodes)
+    return HierarchyBranchIndex(
+        node_by_id=base.node_by_id,
+        id_aliases=base.id_aliases,
+        unique_id_by_name=base.unique_id_by_name,
+        branch_identity_version="1.0",
+        explicit_branch_identity=True,
+    )
+
+
+def _write_hierarchy_dataset(root: Path, nodes: list[dict], *, version: str | None) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "dataset_release_manifest.json").write_text(
+        json.dumps({"country_iso": "PT"}),
+        encoding="utf-8",
+    )
+    payload = {"nodes": nodes}
+    if version is not None:
+        payload["branch_identity_version"] = version
+    (root / "hierarchy.json").write_text(
+        json.dumps(payload),
+        encoding="utf-8",
+    )
+
+
 def test_repair_uses_parent_from_polygon_branch_path():
     index = _index(
         [
@@ -61,6 +117,82 @@ def test_repair_uses_parent_from_polygon_branch_path():
             "source": "admin_tree_id",
         }
     }
+
+
+def test_loader_enables_explicit_branch_identity_only_when_valid(tmp_path):
+    root = tmp_path / "valid"
+    root_path = ("root",)
+    child_path = ("root", "child")
+    _write_hierarchy_dataset(
+        root,
+        [
+            {
+                "id": "root",
+                "level": 4,
+                "name": "Portugal",
+                "parent_id": None,
+                "root_id": "root",
+                "branch_id": "root",
+                "path_ids": list(root_path),
+                "path_signature": hashlib.sha256(
+                    "\x1f".join(root_path).encode("utf-8")
+                ).hexdigest(),
+            },
+            {
+                "id": "child",
+                "level": 6,
+                "name": "Faro",
+                "parent_id": "root",
+                "root_id": "root",
+                "branch_id": "root",
+                "path_ids": list(child_path),
+                "path_signature": hashlib.sha256(
+                    "\x1f".join(child_path).encode("utf-8")
+                ).hexdigest(),
+            },
+        ],
+        version="1.0",
+    )
+
+    index = load_hierarchy_branch_index(root)
+
+    assert index.explicit_branch_identity is True
+    assert [node.id for node in index.path_to_root("pt_child")] == ["child", "root"]
+
+
+def test_loader_falls_back_when_explicit_branch_identity_is_invalid(tmp_path):
+    root = tmp_path / "invalid"
+    _write_hierarchy_dataset(
+        root,
+        [
+            {
+                "id": "root",
+                "level": 4,
+                "name": "Portugal",
+                "parent_id": None,
+                "root_id": "root",
+                "branch_id": "root",
+                "path_ids": ["root"],
+                "path_signature": "invalid",
+            },
+            {
+                "id": "child",
+                "level": 6,
+                "name": "Faro",
+                "parent_id": "root",
+                "root_id": "root",
+                "branch_id": "root",
+                "path_ids": ["root", "child"],
+                "path_signature": "invalid",
+            },
+        ],
+        version="1.0",
+    )
+
+    index = load_hierarchy_branch_index(root)
+
+    assert index.explicit_branch_identity is False
+    assert [node.id for node in index.path_to_root("pt_child")] == ["child", "root"]
 
 
 def test_repair_does_not_cross_branch_for_duplicate_child_name():
@@ -128,5 +260,85 @@ def test_unique_name_fallback_only_runs_without_branch_evidence():
             "name": "Faro",
             "osm_id": "r6",
             "source": "admin_tree_unique_name",
+        }
+    }
+
+
+def test_explicit_branch_identity_rejects_branch_mismatch():
+    index = _explicit_index(
+        [
+            _branch_node(
+                "root_a",
+                4,
+                "Acores",
+                None,
+                ("root_a",),
+                branch_id="branch_a",
+            ),
+            _branch_node(
+                "root_b",
+                4,
+                "Mainland",
+                None,
+                ("root_b",),
+                branch_id="branch_b",
+            ),
+            _branch_node(
+                "r6_b",
+                6,
+                "Faro",
+                "root_b",
+                ("root_b", "r6_b"),
+                branch_id="branch_b",
+            ),
+            _branch_node(
+                "r8_b",
+                8,
+                "Lagoa e Carvoeiro",
+                "r6_b",
+                ("root_b", "r6_b", "r8_b"),
+                branch_id="branch_b",
+            ),
+        ]
+    )
+
+    result = _pipeline(index)._hierarchy_provider(
+        {
+            4: {"osm_id": "pt_root_a", "name": "Acores"},
+            8: {"osm_id": "pt_r8_b", "name": "Lagoa e Carvoeiro"},
+        },
+        {6},
+    )
+
+    assert result == {}
+
+
+def test_explicit_branch_identity_uses_path_membership():
+    index = _explicit_index(
+        [
+            _branch_node("root", 4, "Portugal", None, ("root",), branch_id="root"),
+            _branch_node("r6", 6, "Faro", "root", ("root", "r6"), branch_id="root"),
+            _branch_node(
+                "r8",
+                8,
+                "Lagoa e Carvoeiro",
+                "r6",
+                ("root", "r6", "r8"),
+                branch_id="root",
+            ),
+        ]
+    )
+
+    result = _pipeline(index)._hierarchy_provider(
+        {8: {"osm_id": "pt_r8", "name": "Lagoa e Carvoeiro"}},
+        {6},
+    )
+
+    assert result == {
+        6: {
+            "level": 6,
+            "name": "Faro",
+            "osm_id": "r6",
+            "source": "admin_tree_id",
         }
     }

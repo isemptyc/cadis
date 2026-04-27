@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -8,6 +9,12 @@ from typing import Any
 
 from cadis.runtime.dataset.ffsf_runtime import FFSFSpatialIndexV3
 from cadis.runtime.errors import DatasetNotBootstrappedError, RuntimePolicyInvalidError
+
+
+def _stable_path_signature(path_ids: tuple[str, ...]) -> str:
+    payload = "\x1f".join(path_ids).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
 
 @dataclass(frozen=True)
 class OptionalLayerDeclaration:
@@ -43,6 +50,10 @@ class HierarchyBranchNode:
     name: str
     parent_id: str | None
     names: dict[str, Any] | None
+    root_id: str | None = None
+    branch_id: str | None = None
+    path_ids: tuple[str, ...] | None = None
+    path_signature: str | None = None
 
 
 @dataclass(frozen=True)
@@ -50,6 +61,8 @@ class HierarchyBranchIndex:
     node_by_id: dict[str, HierarchyBranchNode]
     id_aliases: dict[str, str]
     unique_id_by_name: dict[str, str]
+    branch_identity_version: str | None = None
+    explicit_branch_identity: bool = False
 
     def resolve_id(self, raw_id: object) -> str | None:
         if not isinstance(raw_id, str) or not raw_id:
@@ -60,6 +73,16 @@ class HierarchyBranchIndex:
         node_id = self.resolve_id(raw_id)
         if node_id is None:
             return []
+
+        node = self.node_by_id.get(node_id)
+        if self.explicit_branch_identity and node is not None and node.path_ids:
+            path: list[HierarchyBranchNode] = []
+            for path_id in reversed(node.path_ids):
+                path_node = self.node_by_id.get(path_id)
+                if path_node is None:
+                    return []
+                path.append(path_node)
+            return path
 
         path: list[HierarchyBranchNode] = []
         seen: set[str] = set()
@@ -79,6 +102,17 @@ class HierarchyBranchIndex:
         if node_id is None:
             return None
         return self.node_by_id.get(node_id)
+
+    def same_explicit_branch(
+        self,
+        left: HierarchyBranchNode,
+        right: HierarchyBranchNode,
+    ) -> bool | None:
+        if not self.explicit_branch_identity:
+            return None
+        if left.branch_id is None or right.branch_id is None:
+            return None
+        return left.branch_id == right.branch_id
 
 
 def _as_int_list(
@@ -475,6 +509,9 @@ def load_hierarchy_branch_index(dataset_dir: str | Path) -> HierarchyBranchIndex
     parent_by_id: dict[str, str | None] = {}
     name_counts: dict[str, int] = {}
     first_id_by_name: dict[str, str] = {}
+    branch_identity_version = raw.get("branch_identity_version")
+    if not isinstance(branch_identity_version, str) or not branch_identity_version:
+        branch_identity_version = None
 
     for raw_node in nodes:
         if not isinstance(raw_node, dict):
@@ -494,12 +531,36 @@ def load_hierarchy_branch_index(dataset_dir: str | Path) -> HierarchyBranchIndex
         names = raw_node.get("names")
         if not isinstance(names, dict):
             names = None
+        root_id = raw_node.get("root_id")
+        if not isinstance(root_id, str) or not root_id:
+            root_id = None
+        branch_id = raw_node.get("branch_id")
+        if not isinstance(branch_id, str) or not branch_id:
+            branch_id = None
+        raw_path_ids = raw_node.get("path_ids")
+        path_ids: tuple[str, ...] | None = None
+        if isinstance(raw_path_ids, list) and raw_path_ids:
+            parsed_path_ids: list[str] = []
+            for path_id in raw_path_ids:
+                if not isinstance(path_id, str) or not path_id:
+                    parsed_path_ids = []
+                    break
+                parsed_path_ids.append(path_id)
+            if parsed_path_ids:
+                path_ids = tuple(parsed_path_ids)
+        path_signature = raw_node.get("path_signature")
+        if not isinstance(path_signature, str) or not path_signature:
+            path_signature = None
         node_by_id[node_id] = HierarchyBranchNode(
             id=node_id,
             level=level,
             name=name,
             parent_id=parent_id,
             names=names,
+            root_id=root_id,
+            branch_id=branch_id,
+            path_ids=path_ids,
+            path_signature=path_signature,
         )
         parent_by_id[node_id] = parent_id
         name_counts[name] = name_counts.get(name, 0) + 1
@@ -515,6 +576,10 @@ def load_hierarchy_branch_index(dataset_dir: str | Path) -> HierarchyBranchIndex
                 name=node.name,
                 parent_id=None,
                 names=node.names,
+                root_id=node.root_id,
+                branch_id=node.branch_id,
+                path_ids=node.path_ids,
+                path_signature=node.path_signature,
             )
 
     id_aliases: dict[str, str] = {}
@@ -531,11 +596,36 @@ def load_hierarchy_branch_index(dataset_dir: str | Path) -> HierarchyBranchIndex
         for name, node_id in first_id_by_name.items()
         if name_counts.get(name) == 1
     }
+    explicit_branch_identity = branch_identity_version is not None
+    if explicit_branch_identity:
+        for node in node_by_id.values():
+            if (
+                node.branch_id is None
+                or node.root_id is None
+                or node.path_ids is None
+                or node.path_signature is None
+                or not node.path_ids
+                or node.path_ids[-1] != node.id
+                or node.path_ids[0] != node.root_id
+                or node.path_signature != _stable_path_signature(node.path_ids)
+                or any(path_id not in node_by_id for path_id in node.path_ids)
+            ):
+                explicit_branch_identity = False
+                break
+            if len(node.path_ids) == 1:
+                if node.parent_id is not None:
+                    explicit_branch_identity = False
+                    break
+            elif node.parent_id != node.path_ids[-2]:
+                explicit_branch_identity = False
+                break
 
     return HierarchyBranchIndex(
         node_by_id=node_by_id,
         id_aliases=id_aliases,
         unique_id_by_name=unique_id_by_name,
+        branch_identity_version=branch_identity_version,
+        explicit_branch_identity=explicit_branch_identity,
     )
 
 
