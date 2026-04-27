@@ -1,4 +1,6 @@
 from cadis.runtime.dataset.loader import (
+    HierarchyBranchIndex,
+    HierarchyBranchNode,
     OptionalLayerDeclaration,
     RuntimePolicy,
     SemanticOverlay,
@@ -6,6 +8,7 @@ from cadis.runtime.dataset.loader import (
     ensure_declared_overlay_files_present,
     load_dataset_country_name,
     load_geometry_index,
+    load_hierarchy_branch_index,
     load_hierarchy_parent_map,
     load_repair_anchor_map,
     load_runtime_policy,
@@ -14,15 +17,17 @@ from cadis.runtime.dataset.loader import (
 
 __all__ = [
     "OptionalLayerDeclaration",
+    "HierarchyBranchIndex",
+    "HierarchyBranchNode",
     "RuntimePolicy",
     "SemanticOverlay",
     "apply_semantic_overlays",
     "ensure_declared_overlay_files_present",
     "load_dataset_country_name",
     "load_geometry_index",
+    "load_hierarchy_branch_index",
     "load_hierarchy_parent_map",
     "load_repair_anchor_map",
     "load_runtime_policy",
     "load_semantic_overlays",
 ]
-

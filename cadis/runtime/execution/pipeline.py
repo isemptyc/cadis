@@ -6,12 +6,13 @@ from typing import Any
 
 from cadis.runtime.core_adapter import AdminEngineCore
 from cadis.runtime.dataset.loader import (
+    HierarchyBranchIndex,
     RuntimePolicy,
     apply_semantic_overlays,
     ensure_declared_overlay_files_present,
     load_dataset_country_name,
     load_geometry_index,
-    load_hierarchy_parent_map,
+    load_hierarchy_branch_index,
     load_repair_anchor_map,
     load_runtime_policy,
     load_semantic_overlays,
@@ -34,6 +35,18 @@ def evaluate_lookup_status(
     return shape_status_map.get(levels, "partial")
 
 
+def _hierarchy_node_to_public(node: Any, *, source: str) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "level": node.level,
+        "name": node.name,
+        "osm_id": node.id,
+        "source": source,
+    }
+    if isinstance(node.names, dict) and node.names:
+        out["names"] = node.names
+    return out
+
+
 class CadisLookupPipeline:
     """Dataset-driven lookup interpreter with no country-engine imports."""
 
@@ -53,13 +66,9 @@ class CadisLookupPipeline:
         self.core = AdminEngineCore(enable_v2_shadow=False)
         self.geometry_index = load_geometry_index(self.dataset_dir)
         if self.policy.hierarchy_required:
-            self.hierarchy_parent_map = load_hierarchy_parent_map(
-                self.dataset_dir,
-                child_levels=set(self.policy.hierarchy_child_levels),
-                parent_level=self.policy.hierarchy_parent_level,
-            )
+            self.hierarchy_branch_index: HierarchyBranchIndex | None = load_hierarchy_branch_index(self.dataset_dir)
         else:
-            self.hierarchy_parent_map = {}
+            self.hierarchy_branch_index = None
         if self.policy.repair_required:
             self.repair_anchor_map, self.repair_loader_reason_code = load_repair_anchor_map(self.dataset_dir)
         else:
@@ -91,17 +100,56 @@ class CadisLookupPipeline:
     def _hierarchy_provider(self, evidence: dict[int, dict], missing_levels: set[int]) -> dict[int, dict]:
         if not self.policy.hierarchy_required:
             return {}
+        branch_index = self.hierarchy_branch_index
+        if branch_index is None:
+            return {}
         parent_level = self.policy.hierarchy_parent_level
         if parent_level not in missing_levels:
             return {}
+
+        evidence_paths: list[tuple[int, list[Any]]] = []
+        for level in sorted(evidence, reverse=True):
+            path = branch_index.path_to_root(evidence.get(level, {}).get("osm_id"))
+            if path:
+                evidence_paths.append((level, path))
+
+        candidate_by_id: dict[str, Any] = {}
+        for level, path in evidence_paths:
+            if level <= parent_level:
+                continue
+            for candidate in path:
+                if candidate.level == parent_level:
+                    candidate_by_id[candidate.id] = candidate
+
+        for candidate in candidate_by_id.values():
+            candidate_path_ids = {node.id for node in branch_index.path_to_root(candidate.id)}
+            compatible = True
+            for level, path in evidence_paths:
+                path_ids = {node.id for node in path}
+                evidence_node = path[0]
+                if level > parent_level and candidate.id not in path_ids:
+                    compatible = False
+                    break
+                if level < parent_level and evidence_node.id not in candidate_path_ids:
+                    compatible = False
+                    break
+            if compatible:
+                return {parent_level: _hierarchy_node_to_public(candidate, source="admin_tree_id")}
+
+        if evidence_paths:
+            return {}
+
         for child_level in sorted(self.policy.hierarchy_child_levels):
             child = evidence.get(child_level, {})
             name = child.get("name")
             if not isinstance(name, str) or not name:
                 continue
-            node = self.hierarchy_parent_map.get(name)
-            if node:
-                return {parent_level: node}
+            child_node = branch_index.unique_node_by_name(name)
+            if child_node is None or child_node.level != child_level:
+                continue
+            for candidate in branch_index.path_to_root(child_node.id):
+                if candidate.level == parent_level:
+                    return {parent_level: _hierarchy_node_to_public(candidate, source="admin_tree_unique_name")}
         return {}
 
     def _repair_provider(self, evidence: dict[int, dict], missing_levels: set[int]) -> dict[int, dict]:

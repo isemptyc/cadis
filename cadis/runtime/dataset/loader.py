@@ -36,6 +36,51 @@ class RuntimePolicy:
     optional_layers: tuple[OptionalLayerDeclaration, ...]
 
 
+@dataclass(frozen=True)
+class HierarchyBranchNode:
+    id: str
+    level: int
+    name: str
+    parent_id: str | None
+    names: dict[str, Any] | None
+
+
+@dataclass(frozen=True)
+class HierarchyBranchIndex:
+    node_by_id: dict[str, HierarchyBranchNode]
+    id_aliases: dict[str, str]
+    unique_id_by_name: dict[str, str]
+
+    def resolve_id(self, raw_id: object) -> str | None:
+        if not isinstance(raw_id, str) or not raw_id:
+            return None
+        return self.id_aliases.get(raw_id)
+
+    def path_to_root(self, raw_id: object) -> list[HierarchyBranchNode]:
+        node_id = self.resolve_id(raw_id)
+        if node_id is None:
+            return []
+
+        path: list[HierarchyBranchNode] = []
+        seen: set[str] = set()
+        while node_id is not None and node_id not in seen:
+            seen.add(node_id)
+            node = self.node_by_id.get(node_id)
+            if node is None:
+                break
+            path.append(node)
+            node_id = node.parent_id
+        return path
+
+    def unique_node_by_name(self, name: object) -> HierarchyBranchNode | None:
+        if not isinstance(name, str) or not name:
+            return None
+        node_id = self.unique_id_by_name.get(name)
+        if node_id is None:
+            return None
+        return self.node_by_id.get(node_id)
+
+
 def _as_int_list(
     value: object,
     *,
@@ -397,37 +442,120 @@ def load_geometry_index(dataset_dir: str | Path) -> FFSFSpatialIndexV3:
     )
 
 
+def _hierarchy_public_node(node: HierarchyBranchNode, *, source: str) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "level": node.level,
+        "name": node.name,
+        "osm_id": node.id,
+        "source": source,
+    }
+    if isinstance(node.names, dict) and node.names:
+        out["names"] = node.names
+    return out
+
+
+def load_hierarchy_branch_index(dataset_dir: str | Path) -> HierarchyBranchIndex:
+    root = Path(dataset_dir)
+    raw = json.loads((root / "hierarchy.json").read_text(encoding="utf-8"))
+    nodes = raw.get("nodes", [])
+
+    manifest_path = root / "dataset_release_manifest.json"
+    country_prefix: str | None = None
+    if manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception:
+            manifest = {}
+        if isinstance(manifest, dict):
+            iso = manifest.get("country_iso")
+            if isinstance(iso, str) and iso.strip():
+                country_prefix = f"{iso.strip().lower()}_"
+
+    node_by_id: dict[str, HierarchyBranchNode] = {}
+    parent_by_id: dict[str, str | None] = {}
+    name_counts: dict[str, int] = {}
+    first_id_by_name: dict[str, str] = {}
+
+    for raw_node in nodes:
+        if not isinstance(raw_node, dict):
+            continue
+        node_id = raw_node.get("id")
+        level = raw_node.get("level")
+        name = raw_node.get("name")
+        parent_id = raw_node.get("parent_id")
+        if not isinstance(node_id, str) or not node_id:
+            continue
+        if not isinstance(level, int):
+            continue
+        if not isinstance(name, str) or not name:
+            continue
+        if parent_id is not None and not isinstance(parent_id, str):
+            parent_id = None
+        names = raw_node.get("names")
+        if not isinstance(names, dict):
+            names = None
+        node_by_id[node_id] = HierarchyBranchNode(
+            id=node_id,
+            level=level,
+            name=name,
+            parent_id=parent_id,
+            names=names,
+        )
+        parent_by_id[node_id] = parent_id
+        name_counts[name] = name_counts.get(name, 0) + 1
+        first_id_by_name.setdefault(name, node_id)
+
+    # Keep only parent links that resolve within this hierarchy tree.
+    for node_id, parent_id in parent_by_id.items():
+        if parent_id is not None and parent_id not in node_by_id:
+            node = node_by_id[node_id]
+            node_by_id[node_id] = HierarchyBranchNode(
+                id=node.id,
+                level=node.level,
+                name=node.name,
+                parent_id=None,
+                names=node.names,
+            )
+
+    id_aliases: dict[str, str] = {}
+    for node_id in node_by_id:
+        id_aliases[node_id] = node_id
+        if country_prefix:
+            if node_id.startswith(country_prefix):
+                id_aliases[node_id[len(country_prefix):]] = node_id
+            else:
+                id_aliases[f"{country_prefix}{node_id}"] = node_id
+
+    unique_id_by_name = {
+        name: node_id
+        for name, node_id in first_id_by_name.items()
+        if name_counts.get(name) == 1
+    }
+
+    return HierarchyBranchIndex(
+        node_by_id=node_by_id,
+        id_aliases=id_aliases,
+        unique_id_by_name=unique_id_by_name,
+    )
+
+
 def load_hierarchy_parent_map(
     dataset_dir: str | Path,
     *,
     child_levels: set[int],
     parent_level: int,
 ) -> dict[str, dict[str, Any]]:
-    root = Path(dataset_dir)
-    raw = json.loads((root / "hierarchy.json").read_text(encoding="utf-8"))
-    nodes = raw.get("nodes", [])
-    node_by_id = {n["id"]: n for n in nodes if isinstance(n, dict) and n.get("id")}
+    branch_index = load_hierarchy_branch_index(dataset_dir)
     by_child_name: dict[str, dict[str, Any]] = {}
-    for node in nodes:
-        if not isinstance(node, dict):
+    for node in branch_index.node_by_id.values():
+        if node.level not in child_levels:
             continue
-        if node.get("level") not in child_levels:
+        if node.parent_id is None:
             continue
-        parent = node_by_id.get(node.get("parent_id"))
-        if not parent or parent.get("level") != parent_level:
+        parent = branch_index.node_by_id.get(node.parent_id)
+        if parent is None or parent.level != parent_level:
             continue
-        child_name = node.get("name")
-        if not isinstance(child_name, str) or not child_name:
-            continue
-        by_child_name[child_name] = {
-            "level": parent_level,
-            "name": parent.get("name"),
-            "osm_id": parent.get("id"),
-            "source": "admin_tree_name",
-        }
-        parent_names = parent.get("names")
-        if isinstance(parent_names, dict) and parent_names:
-            by_child_name[child_name]["names"] = parent_names
+        by_child_name[node.name] = _hierarchy_public_node(parent, source="admin_tree_name")
     return by_child_name
 
 
