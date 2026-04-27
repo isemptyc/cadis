@@ -30,7 +30,7 @@ from .version import __version__
 
 SCHEMA_VERSION = "1"
 VERSION = __version__
-SUPPORTED_ISO2 = ["JP", "TW", "GB", "IT", "KR", "SE", "NO", "DK", "BE", "NL", "FR", "DE"]
+SUPPORTED_ISO2 = ["JP", "TW", "GB", "IT", "KR", "SE", "NO", "DK", "BE", "NL", "FR", "DE", "ES"]
 OFFSHORE_CANDIDATE_MARGIN_KM = 5.0
 OFFSHORE_MAX_CANDIDATES = 5
 
