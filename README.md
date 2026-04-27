@@ -68,6 +68,26 @@ export CADIS_ALLOWED_ISO2=TW,JP
 
 When enabled, Cadis fails lookups outside the allowlist with `state.dataset.status = "blocked"` and refuses bootstrap/reinstall for those countries.
 
+## Hierarchy Repair Model
+
+Cadis treats dataset artifacts as read-only facts and performs lookup-time
+interpretation only. Polygon evidence remains the primary source for
+administrative hierarchy results.
+
+When polygon evidence is missing an intermediate administrative level, Cadis may
+use the dataset `hierarchy.json` layer to complete the chain. Repair is
+capability-driven:
+
+- Datasets with explicit branch identity metadata are repaired only when the
+  candidate belongs to the same branch/path as the polygon evidence.
+- Older datasets without branch identity metadata remain supported through the
+  guarded legacy repair path.
+- Name-based fallback is only used when no branch evidence can be established
+  and the name resolves to exactly one feature in the dataset.
+
+Cadis does not mutate datasets during repair. Invalid or cross-branch repair
+candidates are rejected instead of overriding polygon-derived evidence.
+
 ## Architecture
 
 ```text
@@ -106,6 +126,7 @@ Cadis does not interpret ISO codes as political statements or sovereignty declar
 | FR   | France           | fr.admin   | 79.6 MB               | 93.2 MB       | 2026-04-25         |
 | DE   | Germany          | de.admin   | 26.4 MB               | 30.6 MB       | 2026-04-27         |
 | ES   | Spain            | es.admin   | 11.3 MB               | 14.7 MB       | 2026-04-27         |
+| PT   | Portugal         | pt.admin   | 5.5 MB                | 6.8 MB        | 2026-04-27         |
 
 Additional ISO 3166-1 entity datasets will be published as they become available.
 
