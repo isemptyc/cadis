@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Iterable
 
 from cadis.runtime.core_adapter import AdminEngineCore
 from cadis.runtime.dataset.loader import (
@@ -267,6 +267,33 @@ class CadisLookupPipeline:
         return self._attach_ready_dataset_state(
             apply_semantic_overlays(bundle["public"], self.semantic_overlays)
         )
+
+    def lookup_many(self, points: Iterable[object]) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for point in points:
+            lat: object | None = None
+            lon: object | None = None
+            if isinstance(point, dict):
+                lat = point.get("lat")
+                lon = point.get("lon")
+            else:
+                lat = getattr(point, "lat", None)
+                lon = getattr(point, "lon", None)
+            if not isinstance(lat, (float, int)) or not isinstance(lon, (float, int)):
+                out.append(
+                    self._attach_ready_dataset_state(
+                        {
+                            "lookup_status": "failed",
+                            "result": {
+                                "admin_hierarchy": [],
+                                "source": "invalid_input",
+                            },
+                        }
+                    )
+                )
+                continue
+            out.append(self.lookup(float(lat), float(lon)))
+        return out
 
 
 RuntimeLookupPipeline = CadisLookupPipeline
