@@ -4,9 +4,9 @@
   "release_name": "stable",
   "release_channel": "production",
   "source_dataset_manifest_url": "https://raw.githubusercontent.com/isemptyc/cadis-dataset/main/releases/dataset_manifest.json",
-  "source_dataset_manifest_generated_at": "2026-04-27T07:28:21Z",
-  "updated_at": "2026-04-27T07:37:32Z",
-  "cadis_version": "0.6.5",
+  "source_dataset_manifest_generated_at": "2026-04-27T16:16:50Z",
+  "updated_at": "2026-04-27T16:19:22Z",
+  "cadis_version": "0.6.7",
   "datasets": {
     "JP": "v1.0.2",
     "TW": "v1.0.5",
@@ -22,6 +22,7 @@
     "DE": "v1.0.0",
     "ES": "v1.0.0",
     "PT": "v1.0.0",
-    "FI": "v1.0.0"
+    "FI": "v1.0.0",
+    "US": "v1.0.0"
   }
 }
