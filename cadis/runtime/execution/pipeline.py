@@ -249,6 +249,9 @@ class CadisLookupPipeline:
                         )
                     )
 
+        return self._lookup_from_polygon_hits(polygon_hits)
+
+    def _lookup_from_polygon_hits(self, polygon_hits: dict[int, dict]) -> dict[str, Any]:
         bundle = self.core.run_v2_shadow_pipeline(
             polygon_hits=polygon_hits,
             allowed_levels=self.allowed_levels,
@@ -269,6 +272,69 @@ class CadisLookupPipeline:
         )
 
     def lookup_many(self, points: Iterable[object]) -> list[dict[str, Any]]:
+        rows = list(points)
+        out: list[dict[str, Any] | None] = [None] * len(rows)
+        valid: list[tuple[int, float, float]] = []
+
+        for index, point in enumerate(rows):
+            lat: object | None = None
+            lon: object | None = None
+            if isinstance(point, dict):
+                lat = point.get("lat")
+                lon = point.get("lon")
+            else:
+                lat = getattr(point, "lat", None)
+                lon = getattr(point, "lon", None)
+            if not isinstance(lat, (float, int)) or not isinstance(lon, (float, int)):
+                out[index] = self._invalid_lookup_result()
+                continue
+            valid.append((index, float(lat), float(lon)))
+
+        if valid:
+            pts = [SimpleNamespace(x=lon, y=lat) for _index, lat, lon in valid]
+            if hasattr(self.geometry_index, "query_many_points"):
+                polygon_hits_many = self.geometry_index.query_many_points(pts, self.allowed_levels)
+            else:
+                polygon_hits_many = [self.geometry_index.query_point(pt, self.allowed_levels) for pt in pts]
+
+            for (index, lat, lon), pt, polygon_hits in zip(valid, pts, polygon_hits_many):
+                if not polygon_hits and self._nearby_enabled():
+                    is_inside_country_scope = self.geometry_index.country_scope_contains_point(pt)
+                    if not is_inside_country_scope:
+                        distance_km = self.geometry_index.distance_km_to_country_scope(pt)
+                        nearby_km = float(self.policy.nearby_max_distance_km)
+                        offshore_km = float(self.policy.offshore_max_distance_km)
+
+                        if distance_km <= nearby_km:
+                            polygon_hits = self.geometry_index.query_point_nearest(
+                                pt,
+                                nearby_km,
+                                self.allowed_levels,
+                            )
+                        elif distance_km <= offshore_km:
+                            out[index] = self._attach_ready_dataset_state(
+                                apply_semantic_overlays(
+                                    self._build_offshore_result(),
+                                    self.semantic_overlays,
+                                )
+                            )
+                            continue
+                out[index] = self._lookup_from_polygon_hits(polygon_hits)
+
+        return [item if item is not None else self._invalid_lookup_result() for item in out]
+
+    def _invalid_lookup_result(self) -> dict[str, Any]:
+        return self._attach_ready_dataset_state(
+            {
+                "lookup_status": "failed",
+                "result": {
+                    "admin_hierarchy": [],
+                    "source": "invalid_input",
+                },
+            }
+        )
+
+    def _lookup_many_scalar_fallback(self, points: Iterable[object]) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
         for point in points:
             lat: object | None = None
@@ -280,17 +346,7 @@ class CadisLookupPipeline:
                 lat = getattr(point, "lat", None)
                 lon = getattr(point, "lon", None)
             if not isinstance(lat, (float, int)) or not isinstance(lon, (float, int)):
-                out.append(
-                    self._attach_ready_dataset_state(
-                        {
-                            "lookup_status": "failed",
-                            "result": {
-                                "admin_hierarchy": [],
-                                "source": "invalid_input",
-                            },
-                        }
-                    )
-                )
+                out.append(self._invalid_lookup_result())
                 continue
             out.append(self.lookup(float(lat), float(lon)))
         return out

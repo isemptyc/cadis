@@ -41,3 +41,5 @@ Status:
 Primary Rust dependency:
 - PyO3
 - https://pyo3.rs/
+- serde_json
+- https://crates.io/crates/serde_json

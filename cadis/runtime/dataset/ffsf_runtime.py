@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import struct
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 try:
     from shapely.geometry import Point
@@ -356,6 +358,36 @@ def _select_country_scope_feature_indices(
 
     return feature_indices, part_indices
 
+
+def _requested_ffsf_backend() -> str:
+    raw = os.environ.get("CADIS_FFSF_BACKEND", "auto")
+    backend = raw.strip().lower() if isinstance(raw, str) else "auto"
+    if backend not in {"auto", "python", "native"}:
+        raise ValueError(
+            f"Unsupported CADIS_FFSF_BACKEND={raw!r}; expected one of: auto, native, python"
+        )
+    return backend
+
+
+def _load_native_ffsf_kernel() -> type[Any]:
+    from cadis_native_cgd import FfsfRuntimeKernel
+
+    return FfsfRuntimeKernel
+
+
+def _create_native_ffsf_kernel(*, ffsf_path: Path, feature_meta_path: Path) -> Any | None:
+    backend = _requested_ffsf_backend()
+    if backend == "python":
+        return None
+    if backend == "native":
+        native_kernel = _load_native_ffsf_kernel()
+        return native_kernel(ffsf_path, feature_meta_path)
+    try:
+        native_kernel = _load_native_ffsf_kernel()
+        return native_kernel(ffsf_path, feature_meta_path)
+    except Exception:
+        return None
+
     def _feature_contains_point(self, feature: FeatureIndexEntry, pt: Point) -> bool:
         for part_idx in range(feature.part_start_idx, feature.part_start_idx + feature.part_count):
             if self._part_contains_point(part_idx, pt):
@@ -433,6 +465,7 @@ class FFSFSpatialIndexV3:
         ring_index: list[int],
         geometry_data: memoryview,
         feature_meta_by_index: list[dict],
+        native_kernel: Any | None = None,
     ):
         self.feature_index = feature_index
         self.part_bboxes = part_bboxes
@@ -440,6 +473,7 @@ class FFSFSpatialIndexV3:
         self.ring_index = ring_index
         self.geometry_data = geometry_data
         self.feature_meta_by_index = feature_meta_by_index
+        self.native_kernel = native_kernel
 
         if len(self.feature_index) != len(self.feature_meta_by_index):
             raise ValueError(
@@ -464,6 +498,10 @@ class FFSFSpatialIndexV3:
             feature_index=self.feature_index,
             feature_meta_by_index=self.feature_meta_by_index,
         )
+
+    @property
+    def backend_name(self) -> str:
+        return "native" if self.native_kernel is not None else "python"
 
     @classmethod
     def from_files(
@@ -537,6 +575,11 @@ class FFSFSpatialIndexV3:
         if not isinstance(feature_meta_by_index, list):
             raise ValueError("feature_meta_by_index dataset must be a JSON list")
 
+        native_kernel = _create_native_ffsf_kernel(
+            ffsf_path=ffsf_path,
+            feature_meta_path=feature_meta_path,
+        )
+
         return cls(
             feature_index=feature_index,
             part_bboxes=part_bboxes,
@@ -544,12 +587,21 @@ class FFSFSpatialIndexV3:
             ring_index=ring_index,
             geometry_data=geometry_data,
             feature_meta_by_index=feature_meta_by_index,
+            native_kernel=native_kernel,
         )
 
     def query_point(self, pt: Point, levels: list[int]) -> dict[int, dict]:
         """
         Return first matching feature per level, preserving feature index order.
         """
+        if self.native_kernel is not None:
+            native_hits = self.native_kernel.query_point_feature_indices(
+                float(pt.x),
+                float(pt.y),
+                levels,
+            )
+            return self._feature_indices_to_hits(native_hits, source="polygon")
+
         level_set = set(levels)
         hits: dict[int, dict] = {}
 
@@ -571,6 +623,33 @@ class FFSFSpatialIndexV3:
             if len(hits) == len(level_set):
                 break
 
+        return hits
+
+    def query_many_points(self, points: list[object], levels: list[int]) -> list[dict[int, dict]]:
+        if self.native_kernel is not None:
+            lons = [float(getattr(point, "x")) for point in points]
+            lats = [float(getattr(point, "y")) for point in points]
+            native_rows = self.native_kernel.query_many_feature_indices(lons, lats, levels)
+            return [self._feature_indices_to_hits(row, source="polygon") for row in native_rows]
+        return [self.query_point(point, levels) for point in points]  # type: ignore[arg-type]
+
+    def _feature_indices_to_hits(self, native_hits: object, *, source: str) -> dict[int, dict]:
+        if not isinstance(native_hits, dict):
+            return {}
+        hits: dict[int, dict] = {}
+        for raw_level, raw_feature_idx in native_hits.items():
+            if not isinstance(raw_level, int) or not isinstance(raw_feature_idx, int):
+                continue
+            if raw_feature_idx < 0 or raw_feature_idx >= len(self.feature_meta_by_index):
+                continue
+            meta = self.feature_meta_by_index[raw_feature_idx]
+            if not isinstance(meta, dict):
+                continue
+            hits[raw_level] = _build_public_feature_hit(
+                level=raw_level,
+                meta=meta,
+                source=source,
+            )
         return hits
 
     def query_point_nearest(

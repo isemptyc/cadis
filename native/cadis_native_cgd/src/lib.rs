@@ -1,6 +1,7 @@
 use pyo3::exceptions::{PyFileNotFoundError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
+use serde_json::Value;
 use std::fs;
 use std::path::PathBuf;
 
@@ -15,6 +16,11 @@ const STRING_OFFSET_SIZE: usize = 16;
 const FLAG_COUNTRY: u16 = 1 << 0;
 const FLAG_OCEAN: u16 = 1 << 1;
 const TERMINAL_OPEN_SEA: u8 = 1;
+
+const FFSF_HEADER_SIZE: usize = 16;
+const FFSF_FEATURE_INDEX_SIZE: usize = 16;
+const FFSF_PART_BBOX_SIZE: usize = 16;
+const FFSF_GEOM_INDEX_SIZE: usize = 16;
 
 #[pyclass]
 struct CgdWorldKernel {
@@ -92,6 +98,7 @@ impl CgdWorldKernel {
 #[pymodule]
 fn cadis_native_cgd(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<CgdWorldKernel>()?;
+    m.add_class::<FfsfRuntimeKernel>()?;
     Ok(())
 }
 
@@ -461,4 +468,379 @@ fn read_f32(data: &[u8], offset: usize) -> PyResult<f32> {
         data[offset + 2],
         data[offset + 3],
     ]))
+}
+
+#[pyclass]
+struct FfsfRuntimeKernel {
+    kernel: FfsfKernel,
+}
+
+#[pymethods]
+impl FfsfRuntimeKernel {
+    #[new]
+    fn new(py: Python<'_>, ffsf_path: &Bound<'_, PyAny>, feature_meta_path: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let os = py.import_bound("os")?;
+        let ffsf_obj = os.call_method1("fspath", (ffsf_path,))?;
+        let meta_obj = os.call_method1("fspath", (feature_meta_path,))?;
+        let ffsf_path = PathBuf::from(ffsf_obj.extract::<String>()?);
+        let feature_meta_path = PathBuf::from(meta_obj.extract::<String>()?);
+        Ok(Self {
+            kernel: FfsfKernel::from_files(ffsf_path, feature_meta_path)?,
+        })
+    }
+
+    #[getter]
+    fn backend_name(&self) -> &'static str {
+        "native"
+    }
+
+    fn query_point_feature_indices(
+        &self,
+        py: Python<'_>,
+        lon: f64,
+        lat: f64,
+        levels: Vec<i32>,
+    ) -> PyResult<PyObject> {
+        let hits = self.kernel.query_point_feature_indices(lon, lat, &levels);
+        feature_hits_to_py(py, &hits)
+    }
+
+    fn query_many_feature_indices(
+        &self,
+        py: Python<'_>,
+        lons: &Bound<'_, PyAny>,
+        lats: &Bound<'_, PyAny>,
+        levels: Vec<i32>,
+    ) -> PyResult<PyObject> {
+        let lon_values = extract_f64_values(lons)?;
+        let lat_values = extract_f64_values(lats)?;
+        if lon_values.len() != lat_values.len() {
+            return Err(PyValueError::new_err("lons and lats must have the same length"));
+        }
+
+        let out = PyList::empty_bound(py);
+        for (lon, lat) in lon_values.into_iter().zip(lat_values.into_iter()) {
+            let hits = self.kernel.query_point_feature_indices(lon, lat, &levels);
+            out.append(feature_hits_to_py(py, &hits)?)?;
+        }
+        Ok(out.into_py(py))
+    }
+}
+
+fn feature_hits_to_py(py: Python<'_>, hits: &[(i32, usize)]) -> PyResult<PyObject> {
+    let dict = PyDict::new_bound(py);
+    for (level, feature_idx) in hits {
+        dict.set_item(*level, *feature_idx)?;
+    }
+    Ok(dict.into_py(py))
+}
+
+struct FfsfKernel {
+    features: Vec<FfsfFeature>,
+    part_bboxes: Vec<FfsfBBox>,
+    geoms: Vec<FfsfGeom>,
+    ring_index: Vec<usize>,
+    geometry_data: Vec<u8>,
+    feature_levels: Vec<Option<i32>>,
+}
+
+#[derive(Clone, Copy)]
+struct FfsfFeature {
+    part_start_idx: usize,
+    part_count: usize,
+}
+
+#[derive(Clone, Copy)]
+struct FfsfGeom {
+    byte_offset: usize,
+    byte_len: usize,
+    ring_start_idx: usize,
+    ring_count: usize,
+}
+
+#[derive(Clone, Copy)]
+struct FfsfBBox {
+    minx: f64,
+    miny: f64,
+    maxx: f64,
+    maxy: f64,
+}
+
+impl FfsfKernel {
+    fn from_files(ffsf_path: PathBuf, feature_meta_path: PathBuf) -> PyResult<Self> {
+        let blob = fs::read(&ffsf_path).map_err(|err| {
+            if err.kind() == std::io::ErrorKind::NotFound {
+                PyFileNotFoundError::new_err(format!("FFSF file not found: {}", ffsf_path.display()))
+            } else {
+                PyValueError::new_err(format!("Failed to read FFSF file {}: {err}", ffsf_path.display()))
+            }
+        })?;
+        let meta_bytes = fs::read(&feature_meta_path).map_err(|err| {
+            if err.kind() == std::io::ErrorKind::NotFound {
+                PyFileNotFoundError::new_err(format!(
+                    "FFSF feature metadata file not found: {}",
+                    feature_meta_path.display()
+                ))
+            } else {
+                PyValueError::new_err(format!(
+                    "Failed to read FFSF feature metadata file {}: {err}",
+                    feature_meta_path.display()
+                ))
+            }
+        })?;
+        Self::from_bytes(blob, &meta_bytes)
+    }
+
+    fn from_bytes(blob: Vec<u8>, meta_bytes: &[u8]) -> PyResult<Self> {
+        if blob.len() < FFSF_HEADER_SIZE {
+            return Err(PyValueError::new_err("Invalid FFSF file (too small)"));
+        }
+        if &blob[0..4] != b"FFSF" {
+            return Err(PyValueError::new_err("Invalid FFSF magic"));
+        }
+        let version = read_u32(&blob, 4)?;
+        if version != 3 {
+            return Err(PyValueError::new_err(format!(
+                "Unsupported FFSF version {version}; expected v3"
+            )));
+        }
+        let feature_count = read_u32(&blob, 8)? as usize;
+        let total_part_count = read_u32(&blob, 12)? as usize;
+        let mut offset = FFSF_HEADER_SIZE;
+
+        let mut features = Vec::with_capacity(feature_count);
+        for _ in 0..feature_count {
+            require_range(&blob, offset, FFSF_FEATURE_INDEX_SIZE)?;
+            let part_start_idx = read_u32(&blob, offset + 8)? as usize;
+            let part_count = read_u32(&blob, offset + 12)? as usize;
+            features.push(FfsfFeature {
+                part_start_idx,
+                part_count,
+            });
+            offset += FFSF_FEATURE_INDEX_SIZE;
+        }
+
+        let mut part_bboxes = Vec::with_capacity(total_part_count);
+        for _ in 0..total_part_count {
+            require_range(&blob, offset, FFSF_PART_BBOX_SIZE)?;
+            part_bboxes.push(FfsfBBox {
+                minx: read_f32(&blob, offset)? as f64,
+                miny: read_f32(&blob, offset + 4)? as f64,
+                maxx: read_f32(&blob, offset + 8)? as f64,
+                maxy: read_f32(&blob, offset + 12)? as f64,
+            });
+            offset += FFSF_PART_BBOX_SIZE;
+        }
+
+        let mut geoms = Vec::with_capacity(total_part_count);
+        let mut total_ring_count = 0usize;
+        for _ in 0..total_part_count {
+            require_range(&blob, offset, FFSF_GEOM_INDEX_SIZE)?;
+            let ring_count = read_u32(&blob, offset + 12)? as usize;
+            geoms.push(FfsfGeom {
+                byte_offset: read_u32(&blob, offset)? as usize,
+                byte_len: read_u32(&blob, offset + 4)? as usize,
+                ring_start_idx: read_u32(&blob, offset + 8)? as usize,
+                ring_count,
+            });
+            total_ring_count += ring_count;
+            offset += FFSF_GEOM_INDEX_SIZE;
+        }
+
+        let mut ring_index = Vec::with_capacity(total_ring_count);
+        for _ in 0..total_ring_count {
+            ring_index.push(read_u32(&blob, offset)? as usize);
+            offset += 4;
+        }
+
+        require_range(&blob, offset, 0)?;
+        let geometry_data = blob[offset..].to_vec();
+        let feature_levels = parse_feature_levels(meta_bytes, feature_count)?;
+
+        Ok(Self {
+            features,
+            part_bboxes,
+            geoms,
+            ring_index,
+            geometry_data,
+            feature_levels,
+        })
+    }
+
+    fn query_point_feature_indices(&self, lon: f64, lat: f64, levels: &[i32]) -> Vec<(i32, usize)> {
+        if !lon.is_finite() || !lat.is_finite() {
+            return Vec::new();
+        }
+        let mut hits: Vec<(i32, usize)> = Vec::new();
+
+        for (feature_idx, feature) in self.features.iter().enumerate() {
+            let Some(level) = self.feature_levels.get(feature_idx).copied().flatten() else {
+                continue;
+            };
+            if !levels.contains(&level) || hits.iter().any(|(hit_level, _)| *hit_level == level) {
+                continue;
+            }
+            if self.feature_contains_point(*feature, lon, lat) {
+                hits.push((level, feature_idx));
+            }
+            if hits.len() == levels.len() {
+                break;
+            }
+        }
+
+        hits
+    }
+
+    fn feature_contains_point(&self, feature: FfsfFeature, lon: f64, lat: f64) -> bool {
+        for part_idx in feature.part_start_idx..feature.part_start_idx + feature.part_count {
+            if self.part_contains_point(part_idx, lon, lat) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn part_contains_point(&self, part_idx: usize, lon: f64, lat: f64) -> bool {
+        let Some(bbox) = self.part_bboxes.get(part_idx).copied() else {
+            return false;
+        };
+        if !(bbox.minx <= lon && lon <= bbox.maxx && bbox.miny <= lat && lat <= bbox.maxy) {
+            return false;
+        }
+
+        let Some(geom) = self.geoms.get(part_idx).copied() else {
+            return false;
+        };
+        if geom.ring_count == 0 {
+            return false;
+        }
+
+        let spanx = bbox.maxx - bbox.minx;
+        let spany = bbox.maxy - bbox.miny;
+        let qx = quantize_ffsf(lon, bbox.minx, spanx);
+        let qy = quantize_ffsf(lat, bbox.miny, spany);
+
+        let mut cursor = geom.byte_offset;
+        let end = match geom.byte_offset.checked_add(geom.byte_len) {
+            Some(value) => value,
+            None => return false,
+        };
+        if end > self.geometry_data.len() {
+            return false;
+        }
+
+        let mut outer_match = false;
+        for ring_ord in 0..geom.ring_count {
+            let ring_idx = geom.ring_start_idx + ring_ord;
+            let Some(point_count) = self.ring_index.get(ring_idx).copied() else {
+                return false;
+            };
+            let byte_count = match point_count.checked_mul(4) {
+                Some(value) => value,
+                None => return false,
+            };
+            let ring_end = match cursor.checked_add(byte_count) {
+                Some(value) => value,
+                None => return false,
+            };
+            if ring_end > end {
+                return false;
+            }
+            let contains = point_in_ffsf_ring(qx, qy, &self.geometry_data[cursor..ring_end]);
+            cursor = ring_end;
+
+            if ring_ord == 0 {
+                if !contains {
+                    return false;
+                }
+                outer_match = true;
+            } else if contains {
+                return false;
+            }
+        }
+
+        outer_match
+    }
+}
+
+fn parse_feature_levels(meta_bytes: &[u8], expected_len: usize) -> PyResult<Vec<Option<i32>>> {
+    let raw: Value = serde_json::from_slice(meta_bytes)
+        .map_err(|err| PyValueError::new_err(format!("Invalid FFSF feature metadata JSON: {err}")))?;
+    let Some(items) = raw.as_array() else {
+        return Err(PyValueError::new_err("feature_meta_by_index dataset must be a JSON list"));
+    };
+    if items.len() != expected_len {
+        return Err(PyValueError::new_err(
+            "feature_meta_by_index length must match FFSF FeatureCount",
+        ));
+    }
+    Ok(items
+        .iter()
+        .map(|item| {
+            item.get("level")
+                .and_then(|level| level.as_i64())
+                .and_then(|level| i32::try_from(level).ok())
+        })
+        .collect())
+}
+
+fn quantize_ffsf(value: f64, min_value: f64, span: f64) -> u16 {
+    if span == 0.0 {
+        return 0;
+    }
+    let scaled = (value - min_value) / span * 65535.0;
+    if scaled <= 0.0 {
+        return 0;
+    }
+    if scaled >= 65535.0 {
+        return 65535;
+    }
+    (scaled + 0.5).floor() as u16
+}
+
+fn point_in_ffsf_ring(qx: u16, qy: u16, ring_data: &[u8]) -> bool {
+    if ring_data.len() < 12 || ring_data.len() % 4 != 0 {
+        return false;
+    }
+    let point_count = ring_data.len() / 4;
+    let mut inside = false;
+    let mut j = point_count - 1;
+    for i in 0..point_count {
+        let xi = read_u16_from_slice(ring_data, i * 4);
+        let yi = read_u16_from_slice(ring_data, i * 4 + 2);
+        let xj = read_u16_from_slice(ring_data, j * 4);
+        let yj = read_u16_from_slice(ring_data, j * 4 + 2);
+
+        if point_on_ffsf_segment(qx, qy, xj, yj, xi, yi) {
+            return true;
+        }
+
+        let intersects = (yi > qy) != (yj > qy);
+        if intersects {
+            let den = i32::from(yj) - i32::from(yi);
+            if den != 0 {
+                let x_cross = f64::from(i32::from(xj) - i32::from(xi))
+                    * f64::from(i32::from(qy) - i32::from(yi))
+                    / f64::from(den)
+                    + f64::from(xi);
+                if f64::from(qx) < x_cross {
+                    inside = !inside;
+                }
+            }
+        }
+        j = i;
+    }
+    inside
+}
+
+fn point_on_ffsf_segment(px: u16, py: u16, x1: u16, y1: u16, x2: u16, y2: u16) -> bool {
+    if px < x1.min(x2) || px > x1.max(x2) || py < y1.min(y2) || py > y1.max(y2) {
+        return false;
+    }
+    (i64::from(x2) - i64::from(x1)) * (i64::from(py) - i64::from(y1))
+        == (i64::from(y2) - i64::from(y1)) * (i64::from(px) - i64::from(x1))
+}
+
+fn read_u16_from_slice(data: &[u8], offset: usize) -> u16 {
+    u16::from_le_bytes([data[offset], data[offset + 1]])
 }
