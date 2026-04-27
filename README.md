@@ -129,6 +129,7 @@ Cadis does not interpret ISO codes as political statements or sovereignty declar
 | PT   | Portugal         | pt.admin   | 5.5 MB                | 6.8 MB        | 2026-04-27         |
 | FI   | Finland          | fi.admin   | 0.9 MB                | 1.1 MB        | 2026-04-27         |
 | US   | United States    | us.admin   | 30.0 MB               | 41.5 MB       | 2026-04-27         |
+| CA   | Canada           | ca.admin   | 10.2 MB               | 13.4 MB       | 2026-04-27         |
 
 Additional ISO 3166-1 entity datasets will be published as they become available.
 
