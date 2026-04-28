@@ -136,6 +136,15 @@ class GeomIndexV2Entry:
     ring_count: int
 
 
+FFSFGeometryParse = tuple[
+    list[FeatureIndexEntry],
+    list[tuple[float, float, float, float]],
+    list[GeomIndexV2Entry],
+    list[int],
+    memoryview,
+]
+
+
 def _build_public_feature_hit(*, level: int, meta: dict, source: str) -> dict:
     hit = {
         "level": level,
@@ -427,6 +436,112 @@ def _create_native_ffsf_kernel(*, ffsf_path: Path, feature_meta_path: Path) -> A
     except Exception:
         return None
 
+
+def _native_kernel_has_fallback_geometry(native_kernel: Any | None) -> bool:
+    if native_kernel is None:
+        return False
+    return all(
+        hasattr(native_kernel, name)
+        for name in (
+            "country_scope_contains_point",
+            "distance_km_to_country_scope",
+            "distance_km_to_feature_index",
+            "query_point_nearest_feature_indices",
+        )
+    )
+
+
+def _read_ffsf_header(blob: bytes, *, ffsf_path: Path) -> tuple[int, int]:
+    if len(blob) < 16:
+        raise ValueError(f"Invalid FFSF file (too small): {ffsf_path}")
+
+    magic = blob[0:4]
+    if magic != b"FFSF":
+        raise ValueError(f"Invalid FFSF magic in {ffsf_path}")
+
+    version, feature_count, total_part_count = struct.unpack_from("<III", blob, 4)
+    if version != 3:
+        raise ValueError(
+            f"Unsupported FFSF version {version} in {ffsf_path}; expected v3"
+        )
+    return feature_count, total_part_count
+
+
+def _read_ffsf_feature_index_only(
+    ffsf_path: Path,
+) -> FFSFGeometryParse:
+    with ffsf_path.open("rb") as fh:
+        header = fh.read(16)
+        feature_count, _ = _read_ffsf_header(header, ffsf_path=ffsf_path)
+        feature_blob = fh.read(feature_count * 16)
+    if len(feature_blob) != feature_count * 16:
+        raise ValueError(f"Invalid FFSF feature index in {ffsf_path}")
+
+    offset = 0
+    feature_index: list[FeatureIndexEntry] = []
+    for _ in range(feature_count):
+        _, _, part_start_idx, part_count = struct.unpack_from("<4I", feature_blob, offset)
+        offset += 16
+        feature_index.append(
+            FeatureIndexEntry(
+                part_start_idx=part_start_idx,
+                part_count=part_count,
+            )
+        )
+
+    return feature_index, [], [], [], memoryview(b"")
+
+
+def _read_ffsf_full_geometry(
+    ffsf_path: Path,
+) -> FFSFGeometryParse:
+    blob = ffsf_path.read_bytes()
+    feature_count, total_part_count = _read_ffsf_header(blob, ffsf_path=ffsf_path)
+
+    offset = 16
+
+    feature_index: list[FeatureIndexEntry] = []
+    for _ in range(feature_count):
+        _, _, part_start_idx, part_count = struct.unpack_from("<4I", blob, offset)
+        offset += 16
+        feature_index.append(
+            FeatureIndexEntry(
+                part_start_idx=part_start_idx,
+                part_count=part_count,
+            )
+        )
+
+    part_bboxes: list[tuple[float, float, float, float]] = []
+    for _ in range(total_part_count):
+        minx, miny, maxx, maxy = struct.unpack_from("<4f", blob, offset)
+        offset += 16
+        part_bboxes.append((minx, miny, maxx, maxy))
+
+    geom_index: list[GeomIndexV2Entry] = []
+    total_ring_count = 0
+    for _ in range(total_part_count):
+        byte_offset, byte_len, ring_start_idx, ring_count = struct.unpack_from(
+            "<4I", blob, offset
+        )
+        offset += 16
+        geom_index.append(
+            GeomIndexV2Entry(
+                byte_offset=byte_offset,
+                byte_len=byte_len,
+                ring_start_idx=ring_start_idx,
+                ring_count=ring_count,
+            )
+        )
+        total_ring_count += ring_count
+
+    ring_index: list[int] = []
+    for _ in range(total_ring_count):
+        (point_count,) = struct.unpack_from("<I", blob, offset)
+        offset += 4
+        ring_index.append(point_count)
+
+    return feature_index, part_bboxes, geom_index, ring_index, memoryview(blob)[offset:]
+
     def _feature_contains_point(self, feature: FeatureIndexEntry, pt: Point) -> bool:
         for part_idx in range(feature.part_start_idx, feature.part_start_idx + feature.part_count):
             if self._part_contains_point(part_idx, pt):
@@ -538,7 +653,15 @@ class FFSFSpatialIndexV3:
                 "feature_meta_by_index length must match FFSF FeatureCount"
             )
 
-        self.part_feature_index: list[int] = [-1] * len(self.part_bboxes)
+        total_part_count = len(self.part_bboxes)
+        if total_part_count == 0:
+            for feature in self.feature_index:
+                total_part_count = max(
+                    total_part_count,
+                    feature.part_start_idx + feature.part_count,
+                )
+
+        self.part_feature_index: list[int] = [-1] * total_part_count
         for feature_idx, feature in enumerate(self.feature_index):
             for part_idx in range(feature.part_start_idx, feature.part_start_idx + feature.part_count):
                 self.part_feature_index[part_idx] = feature_idx
@@ -584,64 +707,6 @@ class FFSFSpatialIndexV3:
         ffsf_path = Path(ffsf_path)
         feature_meta_path = Path(feature_meta_path)
 
-        blob = ffsf_path.read_bytes()
-        if len(blob) < 16:
-            raise ValueError(f"Invalid FFSF file (too small): {ffsf_path}")
-
-        magic = blob[0:4]
-        if magic != b"FFSF":
-            raise ValueError(f"Invalid FFSF magic in {ffsf_path}")
-
-        version, feature_count, total_part_count = struct.unpack_from("<III", blob, 4)
-        if version != 3:
-            raise ValueError(
-                f"Unsupported FFSF version {version} in {ffsf_path}; expected v3"
-            )
-
-        offset = 16
-
-        feature_index: list[FeatureIndexEntry] = []
-        for _ in range(feature_count):
-            _, _, part_start_idx, part_count = struct.unpack_from("<4I", blob, offset)
-            offset += 16
-            feature_index.append(
-                FeatureIndexEntry(
-                    part_start_idx=part_start_idx,
-                    part_count=part_count,
-                )
-            )
-
-        part_bboxes: list[tuple[float, float, float, float]] = []
-        for _ in range(total_part_count):
-            minx, miny, maxx, maxy = struct.unpack_from("<4f", blob, offset)
-            offset += 16
-            part_bboxes.append((minx, miny, maxx, maxy))
-
-        geom_index: list[GeomIndexV2Entry] = []
-        total_ring_count = 0
-        for _ in range(total_part_count):
-            byte_offset, byte_len, ring_start_idx, ring_count = struct.unpack_from(
-                "<4I", blob, offset
-            )
-            offset += 16
-            geom_index.append(
-                GeomIndexV2Entry(
-                    byte_offset=byte_offset,
-                    byte_len=byte_len,
-                    ring_start_idx=ring_start_idx,
-                    ring_count=ring_count,
-                )
-            )
-            total_ring_count += ring_count
-
-        ring_index: list[int] = []
-        for _ in range(total_ring_count):
-            (point_count,) = struct.unpack_from("<I", blob, offset)
-            offset += 4
-            ring_index.append(point_count)
-
-        geometry_data = memoryview(blob)[offset:]
-
         feature_meta_by_index = json.loads(feature_meta_path.read_text(encoding="utf-8"))
         if not isinstance(feature_meta_by_index, list):
             raise ValueError("feature_meta_by_index dataset must be a JSON list")
@@ -650,6 +715,33 @@ class FFSFSpatialIndexV3:
             ffsf_path=ffsf_path,
             feature_meta_path=feature_meta_path,
         )
+        requested_fallback_geometry = _requested_ffsf_fallback_geometry()
+        shadow_enabled = (
+            native_kernel is not None
+            and _requested_ffsf_fallback_geometry_shadow()
+        )
+        compact_native_geometry = (
+            requested_fallback_geometry != "python"
+            and not shadow_enabled
+            and _native_kernel_has_fallback_geometry(native_kernel)
+        )
+
+        if compact_native_geometry:
+            (
+                feature_index,
+                part_bboxes,
+                geom_index,
+                ring_index,
+                geometry_data,
+            ) = _read_ffsf_feature_index_only(ffsf_path)
+        else:
+            (
+                feature_index,
+                part_bboxes,
+                geom_index,
+                ring_index,
+                geometry_data,
+            ) = _read_ffsf_full_geometry(ffsf_path)
 
         return cls(
             feature_index=feature_index,
@@ -1145,17 +1237,7 @@ class FFSFSpatialIndexV3:
         return allowlist
 
     def _has_native_fallback_geometry(self) -> bool:
-        if self.native_kernel is None:
-            return False
-        return all(
-            hasattr(self.native_kernel, name)
-            for name in (
-                "country_scope_contains_point",
-                "distance_km_to_country_scope",
-                "distance_km_to_feature_index",
-                "query_point_nearest_feature_indices",
-            )
-        )
+        return _native_kernel_has_fallback_geometry(self.native_kernel)
 
     def _use_native_fallback_geometry(self) -> bool:
         if self._native_fallback_geometry == "python":

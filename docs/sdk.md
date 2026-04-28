@@ -226,7 +226,7 @@ Fallback geometry operations are controlled separately by `CADIS_FFSF_FALLBACK_G
 
 The native fallback-geometry path returns geometry facts only: country-scope containment, country-scope distance, feature distance, and nearest feature indices. Cadis still applies nearby/offshore policy and constructs final lookup payloads in Python.
 
-When native fallback geometry is active and shadow mode is disabled, Cadis releases the Python FFSF geometry arrays after deriving lightweight routing metadata. Python geometry is retained for `CADIS_FFSF_FALLBACK_GEOMETRY=python`, for native-unavailable `auto` fallback, and for shadow validation.
+When native fallback geometry is active and shadow mode is disabled, Cadis skips building the Python FFSF geometry arrays and keeps only lightweight routing metadata. Python geometry is retained for `CADIS_FFSF_FALLBACK_GEOMETRY=python`, for native-unavailable `auto` fallback, and for shadow validation.
 
 Set `CADIS_FFSF_FALLBACK_GEOMETRY_SHADOW=1` to run Python and native fallback geometry facts in parallel when the native runtime is installed. Shadow mode does not affect lookup output. Non-identical facts are logged as JSON under `[FFSFNativeFallbackGeometryShadow]`. Severity 1 is logged at info level; severities 2 and 3 are logged at warning level so parity failures remain visible in default logging setups. Severity levels:
 

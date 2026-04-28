@@ -22,8 +22,8 @@ In `auto` mode:
 - if native FFSF fallback geometry is unavailable, Cadis falls back to the
   Python geometry path
 - when native fallback geometry is active and shadow mode is disabled, Cadis
-  releases Python-side FFSF geometry arrays after deriving lightweight routing
-  metadata
+  skips building Python-side FFSF geometry arrays and keeps only lightweight
+  routing metadata
 
 Policy interpretation and final lookup result construction remain in Python.
 Rust returns geometry facts only.

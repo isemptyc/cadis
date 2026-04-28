@@ -6,6 +6,7 @@ import struct
 
 import pytest
 
+import cadis.runtime.dataset.ffsf_runtime as ffsf_mod
 from cadis.runtime.dataset.ffsf_runtime import (
     FFSFSpatialIndexV3,
     FeatureIndexEntry,
@@ -154,6 +155,32 @@ def _shadow_payloads(caplog):
     return payloads
 
 
+def _write_minimal_ffsf_dataset(tmp_path):
+    ffsf_path = tmp_path / "geometry.ffsf"
+    meta_path = tmp_path / "geometry_meta.json"
+    ffsf_path.write_bytes(
+        b"FFSF"
+        + struct.pack("<III", 3, 1, 1)
+        + struct.pack("<4I", 0, 0, 0, 1)
+        + struct.pack("<4f", 0.0, 0.0, 1.0, 1.0)
+        + struct.pack("<4I", 0, 0, 0, 0)
+    )
+    meta_path.write_text(
+        json.dumps(
+            [
+                {
+                    "feature_id": "feature-1",
+                    "level": 4,
+                    "name": "Feature 1",
+                    "country_scope_flag": True,
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return ffsf_path, meta_path
+
+
 def test_native_fallback_geometry_routes_geometry_facts(monkeypatch):
     monkeypatch.setenv("CADIS_FFSF_FALLBACK_GEOMETRY", "native")
     index = _index(_NativeFallbackKernel())
@@ -196,6 +223,54 @@ def test_fallback_geometry_defaults_to_python_without_native_runtime(monkeypatch
     assert index.fallback_geometry_backend_name == "python"
     assert index.python_geometry_retained is True
     assert index.country_scope_contains_point(Point(10.0, 20.0)) is False
+
+
+def test_from_files_skips_python_geometry_parse_in_native_compact_mode(monkeypatch, tmp_path):
+    ffsf_path, meta_path = _write_minimal_ffsf_dataset(tmp_path)
+    monkeypatch.delenv("CADIS_FFSF_FALLBACK_GEOMETRY", raising=False)
+    monkeypatch.delenv("CADIS_FFSF_FALLBACK_GEOMETRY_SHADOW", raising=False)
+    monkeypatch.setattr(
+        ffsf_mod,
+        "_create_native_ffsf_kernel",
+        lambda **_: _NativeFallbackKernel(),
+    )
+
+    index = FFSFSpatialIndexV3.from_files(
+        ffsf_path=ffsf_path,
+        feature_meta_path=meta_path,
+    )
+
+    assert index.fallback_geometry_backend_name == "native"
+    assert index.python_geometry_retained is False
+    assert index.part_feature_index == [0]
+    assert index.country_scope_part_indices == [0]
+    assert index.feature_index == []
+    assert index.part_bboxes == []
+    assert index.geom_index == []
+    assert index.ring_index == []
+    assert bytes(index.geometry_data) == b""
+
+
+def test_from_files_retains_python_geometry_for_shadow(monkeypatch, tmp_path):
+    ffsf_path, meta_path = _write_minimal_ffsf_dataset(tmp_path)
+    monkeypatch.delenv("CADIS_FFSF_FALLBACK_GEOMETRY", raising=False)
+    monkeypatch.setenv("CADIS_FFSF_FALLBACK_GEOMETRY_SHADOW", "1")
+    monkeypatch.setattr(
+        ffsf_mod,
+        "_create_native_ffsf_kernel",
+        lambda **_: _NativeFallbackKernel(),
+    )
+
+    index = FFSFSpatialIndexV3.from_files(
+        ffsf_path=ffsf_path,
+        feature_meta_path=meta_path,
+    )
+
+    assert index.fallback_geometry_backend_name == "native"
+    assert index.python_geometry_retained is True
+    assert len(index.feature_index) == 1
+    assert len(index.part_bboxes) == 1
+    assert len(index.geom_index) == 1
 
 
 def test_fallback_geometry_python_mode_retains_python_geometry(monkeypatch):
