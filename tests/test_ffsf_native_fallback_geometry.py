@@ -174,6 +174,22 @@ def test_native_fallback_geometry_routes_geometry_facts(monkeypatch):
     }
 
 
+def test_fallback_geometry_defaults_to_auto_with_native_contract(monkeypatch):
+    monkeypatch.delenv("CADIS_FFSF_FALLBACK_GEOMETRY", raising=False)
+    index = _index(_NativeFallbackKernel())
+
+    assert index.fallback_geometry_backend_name == "native"
+    assert index.country_scope_contains_point(Point(10.0, 20.0)) is True
+
+
+def test_fallback_geometry_defaults_to_python_without_native_runtime(monkeypatch):
+    monkeypatch.delenv("CADIS_FFSF_FALLBACK_GEOMETRY", raising=False)
+    index = _index(None)
+
+    assert index.fallback_geometry_backend_name == "python"
+    assert index.country_scope_contains_point(Point(10.0, 20.0)) is False
+
+
 def test_native_fallback_geometry_requires_complete_native_contract(monkeypatch):
     monkeypatch.setenv("CADIS_FFSF_FALLBACK_GEOMETRY", "native")
     index = _index(object())

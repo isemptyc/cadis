@@ -222,7 +222,7 @@ If dataset files change, backend configuration changes, or runtime initializatio
 
 `CADIS_FFSF_BACKEND` controls optional native FFSF polygon containment. `auto` tries the native module when present, `python` forces the Python runtime, and `native` requires the native module.
 
-Fallback geometry operations are controlled separately by `CADIS_FFSF_FALLBACK_GEOMETRY`. The default is `python`, which keeps offshore, nearest, and country-scope fallback geometry on the existing Python path while native parity is validated. Set `CADIS_FFSF_FALLBACK_GEOMETRY=native` to require the native fallback-geometry contract, or `auto` to use it when the installed native module exposes the required methods.
+Fallback geometry operations are controlled separately by `CADIS_FFSF_FALLBACK_GEOMETRY`. The default is `auto`, which uses the native fallback-geometry contract when the installed native module exposes the required methods and otherwise falls back to Python. Set `CADIS_FFSF_FALLBACK_GEOMETRY=python` to force the Python path, or `native` to require the native fallback-geometry contract.
 
 The native fallback-geometry path returns geometry facts only: country-scope containment, country-scope distance, feature distance, and nearest feature indices. Cadis still applies nearby/offshore policy and constructs final lookup payloads in Python.
 

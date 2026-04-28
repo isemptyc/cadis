@@ -374,8 +374,8 @@ def _requested_ffsf_backend() -> str:
 
 
 def _requested_ffsf_fallback_geometry() -> str:
-    raw = os.environ.get("CADIS_FFSF_FALLBACK_GEOMETRY", "python")
-    backend = raw.strip().lower() if isinstance(raw, str) else "python"
+    raw = os.environ.get("CADIS_FFSF_FALLBACK_GEOMETRY", "auto")
+    backend = raw.strip().lower() if isinstance(raw, str) else "auto"
     if backend not in {"auto", "python", "native"}:
         raise ValueError(
             "Unsupported CADIS_FFSF_FALLBACK_GEOMETRY="
