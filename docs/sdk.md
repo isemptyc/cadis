@@ -237,6 +237,8 @@ The trace also includes offshore discovery counters for memory investigations:
 
 `candidate_catalog_scan_count` is counted after the active allowlist policy is applied. With `allowed_iso2=["TW"]` or `CADIS_ALLOWED_ISO2=TW`, offshore discovery scans only TW candidate catalog entries; without an allowlist, it preserves the global behavior and scans all eligible installed datasets. `candidate_metadata_loaded_count` increments only when Cadis falls back to deriving the country-scope bbox from `geometry_meta.json` and `geometry.ffsf`.
 
+Trace payloads include `memory_samples` with current RSS around first-use and per-phase boundaries such as `before_global_lookup_init`, `after_global_lookup_init`, `after_world_pass`, `before_country_runtime_readiness`, `after_country_runtime_readiness`, `after_country_runtime_scalar_lookup`, and `after_result_finalization`. These samples are intended to attribute first-call memory growth to world lookup initialization, country runtime materialization, lookup execution, or result finalization.
+
 If dataset files change, backend configuration changes, or runtime initialization becomes unstable during a process, cold and warm behavior can diverge. Cadis treats that as an operational consistency issue rather than supported semantic behavior.
 
 ### Native FFSF Geometry

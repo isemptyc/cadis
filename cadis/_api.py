@@ -6,7 +6,9 @@ import json
 import math
 import os
 import re
+import resource
 import struct
+import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
@@ -99,12 +101,25 @@ class _LookupManyDiagnostics:
     rows_by_iso2: dict[str, int] = field(default_factory=dict)
     runtime_groups: list[dict[str, object]] = field(default_factory=list)
     attributes: dict[str, object] = field(default_factory=dict)
+    memory_samples: list[dict[str, object]] = field(default_factory=list)
 
     def inc(self, key: str, amount: int = 1) -> None:
         self.counters[key] = self.counters.get(key, 0) + amount
 
     def add_time(self, key: str, elapsed_sec: float) -> None:
         self.timings_sec[key] = round(self.timings_sec.get(key, 0.0) + elapsed_sec, 6)
+
+    def add_memory_sample(self, label: str, **fields: object) -> None:
+        sample: dict[str, object] = {
+            "label": label,
+            "rss_bytes": _current_rss_bytes(),
+            "peak_rss_bytes": _peak_rss_bytes(),
+        }
+        rss_bytes = sample["rss_bytes"]
+        if isinstance(rss_bytes, int):
+            sample["rss_mb"] = round(rss_bytes / 1024 / 1024, 3)
+        sample.update(fields)
+        self.memory_samples.append(sample)
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -113,6 +128,7 @@ class _LookupManyDiagnostics:
             "rows_by_iso2": dict(sorted(self.rows_by_iso2.items())),
             "runtime_groups": list(self.runtime_groups),
             "attributes": dict(sorted(self.attributes.items())),
+            "memory_samples": list(self.memory_samples),
         }
 
 
@@ -207,6 +223,34 @@ def _installed_iso2_from_cache(cache_dir: str | Path | None = None) -> list[str]
             iso2.append(child.name.upper())
 
     return sorted(set(iso2))
+
+
+def _peak_rss_bytes() -> int:
+    rss = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+    if sys.platform == "darwin":
+        return rss
+    return rss * 1024
+
+
+def _current_rss_bytes() -> int:
+    if sys.platform.startswith("linux"):
+        try:
+            page_size = os.sysconf("SC_PAGE_SIZE")
+            with open("/proc/self/statm", "r", encoding="utf-8") as handle:
+                parts = handle.read().split()
+            if len(parts) >= 2:
+                return int(parts[1]) * int(page_size)
+        except Exception:
+            pass
+    try:
+        output = subprocess.check_output(
+            ["ps", "-o", "rss=", "-p", str(os.getpid())],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+        return int(output.strip()) * 1024
+    except Exception:
+        return _peak_rss_bytes()
 
 
 def _env_float(name: str, default: float) -> float:
@@ -993,11 +1037,24 @@ def _lookup_country_rows(
         diagnostics.runtime_groups.append({"iso2": iso2, "rows": len(rows)})
     readiness_start = time.perf_counter()
     was_loaded = bool(getattr(manager, "has_runtime_loaded", lambda _iso2: False)(iso2))
+    if diagnostics is not None:
+        diagnostics.add_memory_sample(
+            "before_country_runtime_readiness",
+            iso2=iso2,
+            rows=len(rows),
+            runtime_loaded_before=was_loaded,
+        )
     try:
         runtime_handle, dataset_state = manager.get_runtime_readiness(iso2, cache_dir=cache_dir)
     except Exception:
         if diagnostics is not None:
             diagnostics.add_time("country_runtime_readiness", time.perf_counter() - readiness_start)
+            diagnostics.add_memory_sample(
+                "after_country_runtime_readiness_exception",
+                iso2=iso2,
+                rows=len(rows),
+                runtime_loaded_before=was_loaded,
+            )
         for row in rows:
             output[row.index] = _failed_output(
                 state={
@@ -1011,6 +1068,13 @@ def _lookup_country_rows(
         diagnostics.add_time("country_runtime_readiness", time.perf_counter() - readiness_start)
         if runtime_handle is not None and not was_loaded:
             diagnostics.inc("country_runtime_loaded_count")
+        diagnostics.add_memory_sample(
+            "after_country_runtime_readiness",
+            iso2=iso2,
+            rows=len(rows),
+            runtime_loaded_before=was_loaded,
+            runtime_loaded_after=runtime_handle is not None,
+        )
 
     if runtime_handle is None:
         missing_start = time.perf_counter()
@@ -1023,6 +1087,7 @@ def _lookup_country_rows(
             )
         if diagnostics is not None:
             diagnostics.add_time("country_runtime_missing_output", time.perf_counter() - missing_start)
+            diagnostics.add_memory_sample("after_country_runtime_missing_output", iso2=iso2, rows=len(rows))
         return output
 
     def build_output(row: _ResolvedLookupRecord, admin_result: object) -> LookupResponse:
@@ -1072,14 +1137,17 @@ def _lookup_country_rows(
             admin_results = None
         if diagnostics is not None:
             diagnostics.add_time("country_runtime_batch_lookup", time.perf_counter() - batch_lookup_start)
+            diagnostics.add_memory_sample("after_country_runtime_batch_lookup", iso2=iso2, rows=len(rows))
         if isinstance(admin_results, list) and len(admin_results) == len(rows):
             batch_output_start = time.perf_counter()
             for row, admin_result in zip(rows, admin_results):
                 output[row.index] = build_output(row, admin_result)
             if diagnostics is not None:
                 diagnostics.add_time("country_runtime_batch_output", time.perf_counter() - batch_output_start)
+                diagnostics.add_memory_sample("after_country_runtime_batch_output", iso2=iso2, rows=len(rows))
             return output
 
+    scalar_lookup_total_start = time.perf_counter()
     for row in rows:
         scalar_lookup_start = time.perf_counter()
         try:
@@ -1098,6 +1166,13 @@ def _lookup_country_rows(
         output[row.index] = build_output(row, admin_result)
         if diagnostics is not None:
             diagnostics.add_time("country_runtime_scalar_output", time.perf_counter() - scalar_output_start)
+    if diagnostics is not None:
+        diagnostics.add_memory_sample(
+            "after_country_runtime_scalar_lookup",
+            iso2=iso2,
+            rows=len(rows),
+            elapsed_sec=round(time.perf_counter() - scalar_lookup_total_start, 6),
+        )
     return output
 
 
@@ -1152,6 +1227,8 @@ def _resolve_open_sea_lookup_rows(
     runtime_cache_policy: str | None = None,
 ) -> list[_ResolvedLookupRecord]:
     candidate_diagnostics = _OffshoreCandidateDiagnostics()
+    if diagnostics is not None:
+        diagnostics.add_memory_sample("before_offshore_candidate_catalog", open_sea_rows=len(rows))
     candidate_datasets = _offshore_candidate_datasets(
         manager=manager,
         cache_dir=cache_dir,
@@ -1170,6 +1247,13 @@ def _resolve_open_sea_lookup_rows(
         sources = sorted(candidate_diagnostics.bbox_sources)
         diagnostics.attributes["country_scope_bbox_source"] = ",".join(sources) if sources else "none"
         diagnostics.attributes["offshore_candidate_iso2s"] = [item.iso2 for item in candidate_datasets]
+        diagnostics.add_memory_sample(
+            "after_offshore_candidate_catalog",
+            open_sea_rows=len(rows),
+            candidate_catalog_scan_count=candidate_diagnostics.candidate_catalog_scan_count,
+            candidate_metadata_loaded_count=candidate_diagnostics.candidate_metadata_loaded_count,
+            offshore_candidate_dataset_count=len(candidate_datasets),
+        )
 
     candidate_iso2_by_index: dict[int, list[str]] = {}
     candidate_union: set[str] = set()
@@ -1195,6 +1279,12 @@ def _resolve_open_sea_lookup_rows(
         if diagnostics is not None:
             diagnostics.inc("offshore_runtime_groups_considered")
         was_loaded = bool(getattr(manager, "has_runtime_loaded", lambda _iso2: False)(iso2))
+        if diagnostics is not None:
+            diagnostics.add_memory_sample(
+                "before_candidate_runtime_readiness",
+                iso2=iso2,
+                runtime_loaded_before=was_loaded,
+            )
         try:
             runtime_handle = None
             dataset_state = None
@@ -1205,6 +1295,13 @@ def _resolve_open_sea_lookup_rows(
             if runtime_handle is not None and isinstance(dataset_state, dict) and dataset_state.get("status") == "ready":
                 if diagnostics is not None and not was_loaded:
                     diagnostics.inc("candidate_runtime_loaded_count")
+                if diagnostics is not None:
+                    diagnostics.add_memory_sample(
+                        "after_candidate_runtime_readiness",
+                        iso2=iso2,
+                        runtime_loaded_before=was_loaded,
+                        runtime_loaded_after=True,
+                    )
                 pipeline = getattr(getattr(runtime_handle, "runtime", None), "_pipeline", None)
                 policy = getattr(pipeline, "policy", None)
                 offshore_km = getattr(policy, "offshore_max_distance_km", None)
@@ -1221,6 +1318,8 @@ def _resolve_open_sea_lookup_rows(
                     if current is None or (distance_km, iso2) < current:
                         nearest_by_index[row.index] = (distance_km, iso2)
         finally:
+            if diagnostics is not None:
+                diagnostics.add_memory_sample("after_candidate_runtime_group", iso2=iso2)
             if release_runtimes and hasattr(manager, "hint_release"):
                 try:
                     if manager.hint_release(iso2) and diagnostics is not None:
@@ -1300,6 +1399,7 @@ def _lookup_many_impl(
 ) -> list[LookupManyResponseItem]:
     total_start = time.perf_counter()
     if diagnostics is not None:
+        diagnostics.add_memory_sample("lookup_many_start")
         for key in (
             "installed_dataset_count",
             "candidate_catalog_scan_count",
@@ -1331,6 +1431,7 @@ def _lookup_many_impl(
     if diagnostics is not None:
         diagnostics.counters["valid_rows"] = len(valid_rows)
         diagnostics.add_time("input_validation", time.perf_counter() - validation_start)
+        diagnostics.add_memory_sample("after_input_validation", input_rows=len(rows), valid_rows=len(valid_rows))
 
     if not valid_rows:
         finalized = _finalize_lookup_many_results(rows, results)
@@ -1339,10 +1440,21 @@ def _lookup_many_impl(
         return finalized
 
     manager_start = time.perf_counter()
+    if diagnostics is not None:
+        diagnostics.add_memory_sample("before_get_manager")
+    get_manager_start = time.perf_counter()
     manager = get_manager(cache_dir=cache_dir, allowed_iso2=allowed_iso2)
     if diagnostics is not None:
+        diagnostics.add_time("get_manager", time.perf_counter() - get_manager_start)
         diagnostics.counters["allowed_iso2_count"] = len(getattr(manager.dataset_policy, "allowed_iso2", ()))
+        diagnostics.add_memory_sample(
+            "after_get_manager",
+            allowed_iso2_count=diagnostics.counters["allowed_iso2_count"],
+        )
     try:
+        global_lookup_start = time.perf_counter()
+        if diagnostics is not None:
+            diagnostics.add_memory_sample("before_global_lookup_init")
         global_lookup = manager.get_or_init_global_lookup()
     except Exception:
         for row in valid_rows:
@@ -1354,11 +1466,18 @@ def _lookup_many_impl(
                 diagnostics.inc("world_failed_rows")
         finalized = _finalize_lookup_many_results(rows, results)
         if diagnostics is not None:
+            diagnostics.add_time("global_lookup_init", time.perf_counter() - global_lookup_start)
             diagnostics.add_time("manager_init", time.perf_counter() - manager_start)
+            diagnostics.add_memory_sample("after_global_lookup_init_exception")
             diagnostics.add_time("total", time.perf_counter() - total_start)
         return finalized
     if diagnostics is not None:
+        diagnostics.add_time("global_lookup_init", time.perf_counter() - global_lookup_start)
         diagnostics.add_time("manager_init", time.perf_counter() - manager_start)
+        diagnostics.add_memory_sample(
+            "after_global_lookup_init",
+            world_backend=str(getattr(global_lookup, "backend_name", "")),
+        )
 
     resolved_rows: list[_ResolvedLookupRecord] = []
     open_sea_rows: list[_OpenSeaLookupRecord] = []
@@ -1482,6 +1601,12 @@ def _lookup_many_impl(
         if isinstance(backend_name, str) and backend_name:
             diagnostics.counters[f"world_backend_{backend_name}"] = 1
         diagnostics.add_time("world_pass", time.perf_counter() - world_start)
+        diagnostics.add_memory_sample(
+            "after_world_pass",
+            world_cache_entries=len(world_result_cache),
+            direct_country_rows=diagnostics.counters.get("direct_country_rows", 0),
+            open_sea_rows=diagnostics.counters.get("open_sea_rows", 0),
+        )
 
     offshore_resolved_indexes: set[int] = set()
     if open_sea_rows:
@@ -1504,6 +1629,10 @@ def _lookup_many_impl(
                     diagnostics.inc("terminal_non_country_rows")
         if diagnostics is not None:
             diagnostics.add_time("offshore_candidate_pass", time.perf_counter() - offshore_start)
+            diagnostics.add_memory_sample(
+                "after_offshore_candidate_pass",
+                offshore_resolved_rows=len(offshore_resolved),
+            )
 
     grouping_start = time.perf_counter()
     by_iso2: dict[str, list[_ResolvedLookupRecord]] = {}
@@ -1512,6 +1641,7 @@ def _lookup_many_impl(
     if diagnostics is not None:
         diagnostics.rows_by_iso2 = {iso2: len(items) for iso2, items in by_iso2.items()}
         diagnostics.add_time("country_grouping", time.perf_counter() - grouping_start)
+        diagnostics.add_memory_sample("after_country_grouping", country_group_count=len(by_iso2))
 
     use_batch_release = _use_batch_runtime_release(
         runtime_cache_policy=runtime_cache_policy,
@@ -1541,12 +1671,14 @@ def _lookup_many_impl(
                 pass
     if diagnostics is not None:
         diagnostics.add_time("country_runtime_pass", time.perf_counter() - country_start)
+        diagnostics.add_memory_sample("after_country_runtime_pass")
 
     finalize_start = time.perf_counter()
     finalized = _finalize_lookup_many_results(rows, results)
     if diagnostics is not None:
         diagnostics.add_time("result_finalization", time.perf_counter() - finalize_start)
         diagnostics.add_time("total", time.perf_counter() - total_start)
+        diagnostics.add_memory_sample("after_result_finalization", result_count=len(finalized))
     return finalized
 
 
