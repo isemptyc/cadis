@@ -780,6 +780,28 @@ CADIS_OFFSHORE_MAX_CANDIDATES=8
 
 Increasing the candidate count favors recall at the cost of loading more country runtimes for open-sea/offshore points.
 
+### Runtime Cache Profiles
+
+Cadis defaults to a memory-protective runtime profile. It keeps at most six country runtimes resident and automatically releases runtimes after `lookup_many()` country groups when a batch touches more than three ISO2 groups:
+
+```bash
+CADIS_RUNTIME_CACHE_SIZE=6
+CADIS_BATCH_AUTO_RELEASE_THRESHOLD=3
+CADIS_COUNTRY_RUNTIME_BATCH=off
+```
+
+This profile is appropriate for broad or memory-constrained workloads where a batch can touch many countries and unbounded runtime retention would create high peak RSS. The trade-off is repeated runtime loading in multi-batch workflows.
+
+For repeated multi-batch processing where the same country set is reused and memory headroom is available, use a performance profile:
+
+```bash
+CADIS_RUNTIME_CACHE_SIZE=32
+CADIS_BATCH_AUTO_RELEASE_THRESHOLD=999
+CADIS_COUNTRY_RUNTIME_BATCH=off
+```
+
+This retains more country runtimes between batches and avoids runtime churn. It is faster for reuse-heavy workloads but uses more memory. Use `CADIS_RUNTIME_CACHE_SIZE=-1` only when unbounded runtime retention is explicitly acceptable.
+
 For high-volume workloads, prefer:
 
 ```python
