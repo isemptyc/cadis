@@ -990,37 +990,6 @@ class FFSFSpatialIndexV3:
             **_feature_meta_memory_report(self.feature_meta_by_index),
         }
 
-    def _feature_level(self, feature_idx: int) -> object:
-        if isinstance(self.feature_meta_by_index, FeatureMetaColumns):
-            return self.feature_meta_by_index.levels[feature_idx]
-        return self.feature_meta_by_index[feature_idx].get("level")
-
-    def _build_hit_from_feature_index(
-        self,
-        *,
-        feature_idx: int,
-        level: int,
-        source: str,
-    ) -> dict:
-        if isinstance(self.feature_meta_by_index, FeatureMetaColumns):
-            feature_id = self.feature_meta_by_index.feature_ids[feature_idx]
-            hit = {
-                "level": level,
-                "name": self.feature_meta_by_index.names[feature_idx],
-                "osm_id": feature_id,
-                "source": source,
-            }
-            names = self.feature_meta_by_index.names_i18n[feature_idx]
-            if isinstance(names, dict) and names:
-                hit["names"] = names
-            return hit
-
-        return _build_public_feature_hit(
-            level=level,
-            meta=self.feature_meta_by_index[feature_idx],
-            source=source,
-        )
-
     @classmethod
     def from_files(
         cls,
@@ -1093,16 +1062,17 @@ class FFSFSpatialIndexV3:
         hits: dict[int, dict] = {}
 
         for feature_idx, feature in enumerate(self.feature_index):
-            level = self._feature_level(feature_idx)
+            meta = self.feature_meta_by_index[feature_idx]
+            level = meta.get("level")
             if level not in level_set:
                 continue
             if level in hits:
                 continue
 
             if self._feature_contains_point(feature, pt):
-                hits[level] = self._build_hit_from_feature_index(
-                    feature_idx=feature_idx,
+                hits[level] = _build_public_feature_hit(
                     level=level,
+                    meta=meta,
                     source="polygon",
                 )
 
@@ -1123,15 +1093,17 @@ class FFSFSpatialIndexV3:
         if not isinstance(native_hits, dict):
             return {}
         hits: dict[int, dict] = {}
-        feature_meta_count = len(self.feature_meta_by_index)
         for raw_level, raw_feature_idx in native_hits.items():
             if not isinstance(raw_level, int) or not isinstance(raw_feature_idx, int):
                 continue
-            if raw_feature_idx < 0 or raw_feature_idx >= feature_meta_count:
+            if raw_feature_idx < 0 or raw_feature_idx >= len(self.feature_meta_by_index):
                 continue
-            hits[raw_level] = self._build_hit_from_feature_index(
-                feature_idx=raw_feature_idx,
+            meta = self.feature_meta_by_index[raw_feature_idx]
+            if not hasattr(meta, "get"):
+                continue
+            hits[raw_level] = _build_public_feature_hit(
                 level=raw_level,
+                meta=meta,
                 source=source,
             )
         return hits
@@ -1292,7 +1264,8 @@ class FFSFSpatialIndexV3:
             feature_idx = self.part_feature_index[part_idx]
             if feature_idx < 0:
                 continue
-            level = self._feature_level(feature_idx)
+            meta = self.feature_meta_by_index[feature_idx]
+            level = meta.get("level")
             if level not in level_set:
                 continue
 
