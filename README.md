@@ -128,6 +128,7 @@ Cadis does not interpret ISO codes as political statements or sovereignty declar
 | ES   | Spain            | es.admin   | 11.3 MB               | 14.7 MB       | 2026-04-27         |
 | PT   | Portugal         | pt.admin   | 5.5 MB                | 6.8 MB        | 2026-04-27         |
 | FI   | Finland          | fi.admin   | 0.9 MB                | 1.1 MB        | 2026-04-27         |
+| IS   | Iceland          | is.admin   | 0.1 MB                | 0.2 MB        | 2026-04-28         |
 | US   | United States    | us.admin   | 30.0 MB               | 41.5 MB       | 2026-04-27         |
 | CA   | Canada           | ca.admin   | 10.2 MB               | 13.4 MB       | 2026-04-27         |
 | AU   | Australia        | au.admin   | 23.7 MB               | 30.2 MB       | 2026-04-28         |
