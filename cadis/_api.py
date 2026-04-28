@@ -7,6 +7,7 @@ import math
 import os
 import re
 import struct
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -38,6 +39,7 @@ DATASET_ISO2_ALIASES = {
 OFFSHORE_CANDIDATE_MARGIN_KM = 5.0
 OFFSHORE_MAX_CANDIDATES = 5
 BATCH_AUTO_RELEASE_THRESHOLD = 3
+COUNTRY_RUNTIME_BATCH_MIN_ROWS = 256
 
 
 @dataclass(frozen=True)
@@ -231,6 +233,32 @@ def _use_batch_runtime_release(
     raise ValueError(
         "runtime_cache_policy must be one of: batch, release, process_and_release, cache, reuse, keep"
     )
+
+
+def _use_country_runtime_batch(row_count: int) -> bool:
+    mode = os.environ.get("CADIS_COUNTRY_RUNTIME_BATCH", "off").strip().lower()
+    if mode in {"off", "false", "0", "no"}:
+        return False
+    if mode in {"on", "true", "1", "yes"}:
+        return True
+    if mode != "auto":
+        return False
+    return row_count >= _env_int("CADIS_COUNTRY_RUNTIME_BATCH_MIN_ROWS", COUNTRY_RUNTIME_BATCH_MIN_ROWS)
+
+
+def _lookup_trace_enabled() -> bool:
+    return os.environ.get("CADIS_LOOKUP_TRACE", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _emit_lookup_many_trace(diagnostics: _LookupManyDiagnostics) -> None:
+    try:
+        print(
+            "CADIS_LOOKUP_TRACE " + json.dumps(diagnostics.as_dict(), sort_keys=True),
+            file=sys.stderr,
+            flush=True,
+        )
+    except Exception:
+        pass
 
 
 def _failed_output(
@@ -818,9 +846,12 @@ def _lookup_country_rows(
         diagnostics.inc("runtime_groups_processed")
         diagnostics.inc("runtime_group_rows", len(rows))
         diagnostics.runtime_groups.append({"iso2": iso2, "rows": len(rows)})
+    readiness_start = time.perf_counter()
     try:
         runtime_handle, dataset_state = manager.get_runtime_readiness(iso2, cache_dir=cache_dir)
     except Exception:
+        if diagnostics is not None:
+            diagnostics.add_time("country_runtime_readiness", time.perf_counter() - readiness_start)
         for row in rows:
             output[row.index] = _failed_output(
                 state={
@@ -830,7 +861,11 @@ def _lookup_country_rows(
             )
         return output
 
+    if diagnostics is not None:
+        diagnostics.add_time("country_runtime_readiness", time.perf_counter() - readiness_start)
+
     if runtime_handle is None:
+        missing_start = time.perf_counter()
         for row in rows:
             output[row.index] = _failed_output(
                 state={
@@ -838,6 +873,8 @@ def _lookup_country_rows(
                     "dataset": dataset_state,
                 },
             )
+        if diagnostics is not None:
+            diagnostics.add_time("country_runtime_missing_output", time.perf_counter() - missing_start)
         return output
 
     def build_output(row: _ResolvedLookupRecord, admin_result: object) -> LookupResponse:
@@ -867,28 +904,52 @@ def _lookup_country_rows(
             "result": admin_result.get("result"),
         }
 
+    use_runtime_batch = _use_country_runtime_batch(len(rows))
+    if diagnostics is not None:
+        diagnostics.inc("country_runtime_batch_candidate_rows", len(rows))
+        if use_runtime_batch:
+            diagnostics.inc("country_runtime_batch_groups")
+            diagnostics.inc("country_runtime_batch_rows", len(rows))
+        else:
+            diagnostics.inc("country_runtime_scalar_groups")
+            diagnostics.inc("country_runtime_scalar_rows", len(rows))
+
     lookup_many_fn = getattr(runtime_handle.runtime, "lookup_many", None)
-    if callable(lookup_many_fn):
+    if use_runtime_batch and callable(lookup_many_fn):
         points = [{"lat": row.lat, "lon": row.lon} for row in rows]
+        batch_lookup_start = time.perf_counter()
         try:
             admin_results = lookup_many_fn(points)
         except Exception:
             admin_results = None
+        if diagnostics is not None:
+            diagnostics.add_time("country_runtime_batch_lookup", time.perf_counter() - batch_lookup_start)
         if isinstance(admin_results, list) and len(admin_results) == len(rows):
+            batch_output_start = time.perf_counter()
             for row, admin_result in zip(rows, admin_results):
                 output[row.index] = build_output(row, admin_result)
+            if diagnostics is not None:
+                diagnostics.add_time("country_runtime_batch_output", time.perf_counter() - batch_output_start)
             return output
 
     for row in rows:
+        scalar_lookup_start = time.perf_counter()
         try:
             admin_result = runtime_handle.runtime.lookup(row.lat, row.lon)
         except Exception:
+            if diagnostics is not None:
+                diagnostics.add_time("country_runtime_scalar_lookup", time.perf_counter() - scalar_lookup_start)
             output[row.index] = _failed_output(
                 state={"world": row.world_state, "dataset": runtime_handle.dataset_state},
             )
             continue
 
+        if diagnostics is not None:
+            diagnostics.add_time("country_runtime_scalar_lookup", time.perf_counter() - scalar_lookup_start)
+        scalar_output_start = time.perf_counter()
         output[row.index] = build_output(row, admin_result)
+        if diagnostics is not None:
+            diagnostics.add_time("country_runtime_scalar_output", time.perf_counter() - scalar_output_start)
     return output
 
 
@@ -1031,13 +1092,17 @@ def lookup_many(
     allowed_iso2: Iterable[str] | None = None,
     runtime_cache_policy: str | None = None,
 ) -> list[LookupManyResponseItem]:
-    return _lookup_many_impl(
+    diagnostics = _LookupManyDiagnostics() if _lookup_trace_enabled() else None
+    results = _lookup_many_impl(
         points,
         cache_dir=cache_dir,
         allowed_iso2=allowed_iso2,
-        diagnostics=None,
+        diagnostics=diagnostics,
         runtime_cache_policy=runtime_cache_policy,
     )
+    if diagnostics is not None:
+        _emit_lookup_many_trace(diagnostics)
+    return results
 
 
 def _lookup_many_with_diagnostics(

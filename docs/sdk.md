@@ -212,6 +212,10 @@ Cadis guarantees cache-state invariance for a stable runtime environment. Stable
 
 `lookup_many()` cache behavior is a performance policy, not a semantic policy. `runtime_cache_policy="batch"` may release country runtimes after each group, while `runtime_cache_policy="cache"` may retain them for reuse; both modes must produce identical lookup payloads for the same inputs in a stable environment. `CADIS_RUNTIME_CACHE_SIZE=0` disables residual country runtime retention and is useful as a canonical cold-cache reference path for debugging.
 
+Country runtime batch execution is also a performance policy. `CADIS_COUNTRY_RUNTIME_BATCH=off` is the default and uses the scalar country runtime path. Set `CADIS_COUNTRY_RUNTIME_BATCH=auto` to use the country runtime batch path only for sufficiently large same-country groups, controlled by `CADIS_COUNTRY_RUNTIME_BATCH_MIN_ROWS` with default `256`, or `on` to force batch execution. This path is most useful for large same-country batches, such as country dataset evaluation or bulk imports where most points resolve to one ISO2. It may provide little benefit for mixed-country workloads dominated by runtime loading, offshore/nearest fallback, or many small country groups.
+
+Set `CADIS_LOOKUP_TRACE=1` to emit one JSON timing line per `lookup_many()` call on stderr. The trace includes world, offshore, grouping, country runtime readiness, scalar/batch runtime execution, and result-finalization timings.
+
 If dataset files change, backend configuration changes, or runtime initialization becomes unstable during a process, cold and warm behavior can diverge. Cadis treats that as an operational consistency issue rather than supported semantic behavior.
 
 ### Top-Level Fields
