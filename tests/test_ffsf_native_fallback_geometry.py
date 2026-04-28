@@ -372,6 +372,48 @@ def test_columnar_feature_meta_mode_preserves_native_hit_mapping(monkeypatch):
     assert isinstance(index.feature_meta_by_index, ffsf_mod.FeatureMetaColumns)
 
 
+def test_columnar_hot_paths_bypass_feature_meta_view(monkeypatch):
+    monkeypatch.setenv("CADIS_FEATURE_META_MODE", "columnar")
+    monkeypatch.setenv("CADIS_FFSF_FALLBACK_GEOMETRY", "python")
+    python_index = _square_index(None)
+    monkeypatch.setenv("CADIS_FFSF_FALLBACK_GEOMETRY", "native")
+    native_index = _index(_NativeFallbackKernel())
+
+    def fail_get(self, key, default=None):
+        raise AssertionError("hot path should not call FeatureMetaView.get")
+
+    monkeypatch.setattr(ffsf_mod.FeatureMetaView, "get", fail_get)
+
+    assert python_index.query_point(Point(0.5, 0.5), [4]) == {
+        4: {
+            "level": 4,
+            "name": "Feature 0",
+            "osm_id": "feature-0",
+            "source": "polygon",
+        }
+    }
+    assert python_index.query_point_nearest(
+        Point(3.0, 0.5),
+        max_distance_km=500.0,
+        levels=[4],
+    ) == {
+        4: {
+            "level": 4,
+            "name": "Feature 0",
+            "osm_id": "feature-0",
+            "source": "nearby",
+        }
+    }
+    assert native_index.query_point(Point(10.0, 20.0), [4]) == {
+        4: {
+            "level": 4,
+            "name": "Feature 1",
+            "osm_id": "feature-1",
+            "source": "polygon",
+        }
+    }
+
+
 def test_memory_report_exposes_released_geometry_counts(monkeypatch):
     monkeypatch.delenv("CADIS_FFSF_FALLBACK_GEOMETRY", raising=False)
     index = _index(_NativeFallbackKernel())
