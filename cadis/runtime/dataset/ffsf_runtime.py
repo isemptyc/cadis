@@ -369,6 +369,17 @@ def _requested_ffsf_backend() -> str:
     return backend
 
 
+def _requested_ffsf_fallback_geometry() -> str:
+    raw = os.environ.get("CADIS_FFSF_FALLBACK_GEOMETRY", "python")
+    backend = raw.strip().lower() if isinstance(raw, str) else "python"
+    if backend not in {"auto", "python", "native"}:
+        raise ValueError(
+            "Unsupported CADIS_FFSF_FALLBACK_GEOMETRY="
+            f"{raw!r}; expected one of: auto, native, python"
+        )
+    return backend
+
+
 def _load_native_ffsf_kernel() -> type[Any]:
     from cadis_native_cgd import FfsfRuntimeKernel
 
@@ -474,6 +485,16 @@ class FFSFSpatialIndexV3:
         self.geometry_data = geometry_data
         self.feature_meta_by_index = feature_meta_by_index
         self.native_kernel = native_kernel
+        requested_fallback_geometry = _requested_ffsf_fallback_geometry()
+        if requested_fallback_geometry == "native" and native_kernel is None:
+            raise RuntimeError(
+                "CADIS_FFSF_FALLBACK_GEOMETRY=native requires a native FFSF runtime"
+            )
+        self._native_fallback_geometry = (
+            requested_fallback_geometry
+            if native_kernel is not None
+            else "python"
+        )
 
         if len(self.feature_index) != len(self.feature_meta_by_index):
             raise ValueError(
@@ -502,6 +523,12 @@ class FFSFSpatialIndexV3:
     @property
     def backend_name(self) -> str:
         return "native" if self.native_kernel is not None else "python"
+
+    @property
+    def fallback_geometry_backend_name(self) -> str:
+        if self._native_fallback_geometry != "python" and self._has_native_fallback_geometry():
+            return "native"
+        return "python"
 
     @classmethod
     def from_files(
@@ -663,6 +690,15 @@ class FFSFSpatialIndexV3:
         """
         if max_distance_km <= 0:
             return {}
+        if self._use_native_fallback_geometry():
+            native_hits = self.native_kernel.query_point_nearest_feature_indices(
+                float(pt.x),
+                float(pt.y),
+                float(max_distance_km),
+                levels,
+                self.part_feature_index,
+            )
+            return self._feature_indices_to_hits(native_hits, source="nearby")
 
         level_set = set(levels)
         max_km = float(max_distance_km)
@@ -709,6 +745,14 @@ class FFSFSpatialIndexV3:
         return bool(self.country_scope_part_indices)
 
     def country_scope_contains_point(self, pt: Point) -> bool:
+        if self._use_native_fallback_geometry():
+            return bool(
+                self.native_kernel.country_scope_contains_point(
+                    float(pt.x),
+                    float(pt.y),
+                    self.country_scope_part_indices,
+                )
+            )
         for part_idx in self.country_scope_part_indices:
             if self._part_contains_point(part_idx, pt):
                 return True
@@ -717,6 +761,14 @@ class FFSFSpatialIndexV3:
     def distance_km_to_country_scope(self, pt: Point) -> float:
         if not self.country_scope_part_indices:
             return float("inf")
+        if self._use_native_fallback_geometry():
+            return float(
+                self.native_kernel.distance_km_to_country_scope(
+                    float(pt.x),
+                    float(pt.y),
+                    self.country_scope_part_indices,
+                )
+            )
         if self.country_scope_contains_point(pt):
             return 0.0
 
@@ -732,6 +784,14 @@ class FFSFSpatialIndexV3:
         feature_idx = self.feature_id_to_index.get(feature_id)
         if feature_idx is None:
             return float("inf")
+        if self._use_native_fallback_geometry():
+            return float(
+                self.native_kernel.distance_km_to_feature_index(
+                    float(pt.x),
+                    float(pt.y),
+                    feature_idx,
+                )
+            )
         feature = self.feature_index[feature_idx]
         min_dist = float("inf")
         for part_idx in range(feature.part_start_idx, feature.part_start_idx + feature.part_count):
@@ -765,6 +825,30 @@ class FFSFSpatialIndexV3:
                 allowlist[level].add(feature_id)
 
         return allowlist
+
+    def _has_native_fallback_geometry(self) -> bool:
+        if self.native_kernel is None:
+            return False
+        return all(
+            hasattr(self.native_kernel, name)
+            for name in (
+                "country_scope_contains_point",
+                "distance_km_to_country_scope",
+                "distance_km_to_feature_index",
+                "query_point_nearest_feature_indices",
+            )
+        )
+
+    def _use_native_fallback_geometry(self) -> bool:
+        if self._native_fallback_geometry == "python":
+            return False
+        has_native = self._has_native_fallback_geometry()
+        if self._native_fallback_geometry == "native" and not has_native:
+            raise RuntimeError(
+                "CADIS_FFSF_FALLBACK_GEOMETRY=native requires native FFSF "
+                "fallback geometry methods"
+            )
+        return has_native
 
     def _feature_contains_point(self, feature: FeatureIndexEntry, pt: Point) -> bool:
         for part_idx in range(feature.part_start_idx, feature.part_start_idx + feature.part_count):

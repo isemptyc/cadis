@@ -218,6 +218,14 @@ Set `CADIS_LOOKUP_TRACE=1` to emit one JSON timing line per `lookup_many()` call
 
 If dataset files change, backend configuration changes, or runtime initialization becomes unstable during a process, cold and warm behavior can diverge. Cadis treats that as an operational consistency issue rather than supported semantic behavior.
 
+### Native FFSF Geometry
+
+`CADIS_FFSF_BACKEND` controls optional native FFSF polygon containment. `auto` tries the native module when present, `python` forces the Python runtime, and `native` requires the native module.
+
+Fallback geometry operations are controlled separately by `CADIS_FFSF_FALLBACK_GEOMETRY`. The default is `python`, which keeps offshore, nearest, and country-scope fallback geometry on the existing Python path while native parity is validated. Set `CADIS_FFSF_FALLBACK_GEOMETRY=native` to require the native fallback-geometry contract, or `auto` to use it when the installed native module exposes the required methods.
+
+The native fallback-geometry path returns geometry facts only: country-scope containment, country-scope distance, feature distance, and nearest feature indices. Cadis still applies nearby/offshore policy and constructs final lookup payloads in Python.
+
 ### Top-Level Fields
 
 - `engine`: always `"cadis"`.

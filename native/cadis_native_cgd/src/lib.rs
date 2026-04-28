@@ -38,7 +38,10 @@ impl CgdWorldKernel {
             if err.kind() == std::io::ErrorKind::NotFound {
                 PyFileNotFoundError::new_err(format!("CGD file not found: {}", cgd_path.display()))
             } else {
-                PyValueError::new_err(format!("Failed to read CGD file {}: {err}", cgd_path.display()))
+                PyValueError::new_err(format!(
+                    "Failed to read CGD file {}: {err}",
+                    cgd_path.display()
+                ))
             }
         })?;
         Ok(Self {
@@ -65,7 +68,9 @@ impl CgdWorldKernel {
         let lon_values = extract_f64_values(lons)?;
         let lat_values = extract_f64_values(lats)?;
         if lon_values.len() != lat_values.len() {
-            return Err(PyValueError::new_err("lons and lats must have the same length"));
+            return Err(PyValueError::new_err(
+                "lons and lats must have the same length",
+            ));
         }
 
         let out = PyList::empty_bound(py);
@@ -233,7 +238,13 @@ impl CgdKernel {
                 .ok_or_else(|| PyValueError::new_err("CGD string index out of range"))?
                 .clone();
             let ring_start = rings.len();
-            read_geometry(&data, rec.geom_offset, rec.ring_count, &mut rings, &mut points)?;
+            read_geometry(
+                &data,
+                rec.geom_offset,
+                rec.ring_count,
+                &mut rings,
+                &mut points,
+            )?;
             polygons.push(Polygon {
                 bbox,
                 ring_start,
@@ -299,8 +310,8 @@ impl CgdKernel {
                 continue;
             }
 
-            let bbox_area =
-                (polygon.bbox.max_lon - polygon.bbox.min_lon) * (polygon.bbox.max_lat - polygon.bbox.min_lat);
+            let bbox_area = (polygon.bbox.max_lon - polygon.bbox.min_lon)
+                * (polygon.bbox.max_lat - polygon.bbox.min_lat);
             if best_named_ocean.is_none()
                 || best_named_ocean_bbox_area.is_none()
                 || bbox_area < best_named_ocean_bbox_area.unwrap()
@@ -478,7 +489,11 @@ struct FfsfRuntimeKernel {
 #[pymethods]
 impl FfsfRuntimeKernel {
     #[new]
-    fn new(py: Python<'_>, ffsf_path: &Bound<'_, PyAny>, feature_meta_path: &Bound<'_, PyAny>) -> PyResult<Self> {
+    fn new(
+        py: Python<'_>,
+        ffsf_path: &Bound<'_, PyAny>,
+        feature_meta_path: &Bound<'_, PyAny>,
+    ) -> PyResult<Self> {
         let os = py.import_bound("os")?;
         let ffsf_obj = os.call_method1("fspath", (ffsf_path,))?;
         let meta_obj = os.call_method1("fspath", (feature_meta_path,))?;
@@ -515,7 +530,9 @@ impl FfsfRuntimeKernel {
         let lon_values = extract_f64_values(lons)?;
         let lat_values = extract_f64_values(lats)?;
         if lon_values.len() != lat_values.len() {
-            return Err(PyValueError::new_err("lons and lats must have the same length"));
+            return Err(PyValueError::new_err(
+                "lons and lats must have the same length",
+            ));
         }
 
         let out = PyList::empty_bound(py);
@@ -524,6 +541,40 @@ impl FfsfRuntimeKernel {
             out.append(feature_hits_to_py(py, &hits)?)?;
         }
         Ok(out.into_py(py))
+    }
+
+    fn country_scope_contains_point(&self, lon: f64, lat: f64, part_indices: Vec<usize>) -> bool {
+        self.kernel
+            .country_scope_contains_point(lon, lat, &part_indices)
+    }
+
+    fn distance_km_to_country_scope(&self, lon: f64, lat: f64, part_indices: Vec<usize>) -> f64 {
+        self.kernel
+            .distance_km_to_country_scope(lon, lat, &part_indices)
+    }
+
+    fn distance_km_to_feature_index(&self, lon: f64, lat: f64, feature_idx: usize) -> f64 {
+        self.kernel
+            .distance_km_to_feature_index(lon, lat, feature_idx)
+    }
+
+    fn query_point_nearest_feature_indices(
+        &self,
+        py: Python<'_>,
+        lon: f64,
+        lat: f64,
+        max_distance_km: f64,
+        levels: Vec<i32>,
+        part_feature_indices: Vec<i64>,
+    ) -> PyResult<PyObject> {
+        let hits = self.kernel.query_point_nearest_feature_indices(
+            lon,
+            lat,
+            max_distance_km,
+            &levels,
+            &part_feature_indices,
+        );
+        feature_hits_to_py(py, &hits)
     }
 }
 
@@ -570,9 +621,15 @@ impl FfsfKernel {
     fn from_files(ffsf_path: PathBuf, feature_meta_path: PathBuf) -> PyResult<Self> {
         let blob = fs::read(&ffsf_path).map_err(|err| {
             if err.kind() == std::io::ErrorKind::NotFound {
-                PyFileNotFoundError::new_err(format!("FFSF file not found: {}", ffsf_path.display()))
+                PyFileNotFoundError::new_err(format!(
+                    "FFSF file not found: {}",
+                    ffsf_path.display()
+                ))
             } else {
-                PyValueError::new_err(format!("Failed to read FFSF file {}: {err}", ffsf_path.display()))
+                PyValueError::new_err(format!(
+                    "Failed to read FFSF file {}: {err}",
+                    ffsf_path.display()
+                ))
             }
         })?;
         let meta_bytes = fs::read(&feature_meta_path).map_err(|err| {
@@ -691,6 +748,111 @@ impl FfsfKernel {
         hits
     }
 
+    fn query_point_nearest_feature_indices(
+        &self,
+        lon: f64,
+        lat: f64,
+        max_distance_km: f64,
+        levels: &[i32],
+        part_feature_indices: &[i64],
+    ) -> Vec<(i32, usize)> {
+        if !lon.is_finite() || !lat.is_finite() || max_distance_km <= 0.0 {
+            return Vec::new();
+        }
+
+        let threshold_deg = max_distance_km / 111.0;
+        let qminx = lon - threshold_deg;
+        let qmaxx = lon + threshold_deg;
+        let qminy = lat - threshold_deg;
+        let qmaxy = lat + threshold_deg;
+        let mut nearest_by_level: Vec<(i32, f64, usize)> = Vec::new();
+
+        for (part_idx, bbox) in self.part_bboxes.iter().copied().enumerate() {
+            if bbox.maxx < qminx || bbox.minx > qmaxx || bbox.maxy < qminy || bbox.miny > qmaxy {
+                continue;
+            }
+
+            let Some(raw_feature_idx) = part_feature_indices.get(part_idx).copied() else {
+                continue;
+            };
+            if raw_feature_idx < 0 {
+                continue;
+            }
+            let feature_idx = raw_feature_idx as usize;
+            let Some(level) = self.feature_levels.get(feature_idx).copied().flatten() else {
+                continue;
+            };
+            if !levels.contains(&level) {
+                continue;
+            }
+
+            let dist_km = self.distance_km_to_part(lon, lat, part_idx);
+            if dist_km > max_distance_km {
+                continue;
+            }
+
+            if let Some(best) = nearest_by_level
+                .iter_mut()
+                .find(|(best_level, _, _)| *best_level == level)
+            {
+                if dist_km < best.1 {
+                    *best = (level, dist_km, feature_idx);
+                }
+            } else {
+                nearest_by_level.push((level, dist_km, feature_idx));
+            }
+        }
+
+        nearest_by_level
+            .into_iter()
+            .map(|(level, _, feature_idx)| (level, feature_idx))
+            .collect()
+    }
+
+    fn country_scope_contains_point(&self, lon: f64, lat: f64, part_indices: &[usize]) -> bool {
+        if !lon.is_finite() || !lat.is_finite() {
+            return false;
+        }
+        part_indices
+            .iter()
+            .any(|part_idx| self.part_contains_point(*part_idx, lon, lat))
+    }
+
+    fn distance_km_to_country_scope(&self, lon: f64, lat: f64, part_indices: &[usize]) -> f64 {
+        if part_indices.is_empty() || !lon.is_finite() || !lat.is_finite() {
+            return f64::INFINITY;
+        }
+        if self.country_scope_contains_point(lon, lat, part_indices) {
+            return 0.0;
+        }
+
+        let mut min_dist = f64::INFINITY;
+        for part_idx in part_indices {
+            let dist = self.distance_km_to_part(lon, lat, *part_idx);
+            if dist < min_dist {
+                min_dist = dist;
+            }
+        }
+        min_dist
+    }
+
+    fn distance_km_to_feature_index(&self, lon: f64, lat: f64, feature_idx: usize) -> f64 {
+        if !lon.is_finite() || !lat.is_finite() {
+            return f64::INFINITY;
+        }
+        let Some(feature) = self.features.get(feature_idx).copied() else {
+            return f64::INFINITY;
+        };
+        let mut min_dist = f64::INFINITY;
+        for part_idx in feature.part_start_idx..feature.part_start_idx + feature.part_count {
+            let dist = self.distance_km_to_part(lon, lat, part_idx);
+            if dist < min_dist {
+                min_dist = dist;
+            }
+        }
+        min_dist
+    }
+
     fn feature_contains_point(&self, feature: FfsfFeature, lon: f64, lat: f64) -> bool {
         for part_idx in feature.part_start_idx..feature.part_start_idx + feature.part_count {
             if self.part_contains_point(part_idx, lon, lat) {
@@ -761,13 +923,73 @@ impl FfsfKernel {
 
         outer_match
     }
+
+    fn distance_km_to_part(&self, lon: f64, lat: f64, part_idx: usize) -> f64 {
+        let Some(bbox) = self.part_bboxes.get(part_idx).copied() else {
+            return f64::INFINITY;
+        };
+        let Some(geom) = self.geoms.get(part_idx).copied() else {
+            return f64::INFINITY;
+        };
+        if geom.ring_count == 0 {
+            return f64::INFINITY;
+        }
+
+        let spanx = bbox.maxx - bbox.minx;
+        let spany = bbox.maxy - bbox.miny;
+        let mut cursor = geom.byte_offset;
+        let end = match geom.byte_offset.checked_add(geom.byte_len) {
+            Some(value) => value,
+            None => return f64::INFINITY,
+        };
+        if end > self.geometry_data.len() {
+            return f64::INFINITY;
+        }
+
+        let mut min_dist = f64::INFINITY;
+        for ring_ord in 0..geom.ring_count {
+            let ring_idx = geom.ring_start_idx + ring_ord;
+            let Some(point_count) = self.ring_index.get(ring_idx).copied() else {
+                return f64::INFINITY;
+            };
+            let byte_count = match point_count.checked_mul(4) {
+                Some(value) => value,
+                None => return f64::INFINITY,
+            };
+            let ring_end = match cursor.checked_add(byte_count) {
+                Some(value) => value,
+                None => return f64::INFINITY,
+            };
+            if ring_end > end {
+                return f64::INFINITY;
+            }
+
+            let dist = distance_km_to_ffsf_ring(
+                lon,
+                lat,
+                &self.geometry_data[cursor..ring_end],
+                bbox.minx,
+                bbox.miny,
+                spanx,
+                spany,
+            );
+            if dist < min_dist {
+                min_dist = dist;
+            }
+            cursor = ring_end;
+        }
+        min_dist
+    }
 }
 
 fn parse_feature_levels(meta_bytes: &[u8], expected_len: usize) -> PyResult<Vec<Option<i32>>> {
-    let raw: Value = serde_json::from_slice(meta_bytes)
-        .map_err(|err| PyValueError::new_err(format!("Invalid FFSF feature metadata JSON: {err}")))?;
+    let raw: Value = serde_json::from_slice(meta_bytes).map_err(|err| {
+        PyValueError::new_err(format!("Invalid FFSF feature metadata JSON: {err}"))
+    })?;
     let Some(items) = raw.as_array() else {
-        return Err(PyValueError::new_err("feature_meta_by_index dataset must be a JSON list"));
+        return Err(PyValueError::new_err(
+            "feature_meta_by_index dataset must be a JSON list",
+        ));
     };
     if items.len() != expected_len {
         return Err(PyValueError::new_err(
@@ -839,6 +1061,97 @@ fn point_on_ffsf_segment(px: u16, py: u16, x1: u16, y1: u16, x2: u16, y2: u16) -
     }
     (i64::from(x2) - i64::from(x1)) * (i64::from(py) - i64::from(y1))
         == (i64::from(y2) - i64::from(y1)) * (i64::from(px) - i64::from(x1))
+}
+
+fn distance_km_to_ffsf_ring(
+    lon: f64,
+    lat: f64,
+    ring_data: &[u8],
+    minx: f64,
+    miny: f64,
+    mut spanx: f64,
+    mut spany: f64,
+) -> f64 {
+    if ring_data.len() < 8 || ring_data.len() % 4 != 0 {
+        return f64::INFINITY;
+    }
+    if spanx == 0.0 {
+        spanx = 1.0;
+    }
+    if spany == 0.0 {
+        spany = 1.0;
+    }
+
+    let point_count = ring_data.len() / 4;
+    if point_count < 2 {
+        return f64::INFINITY;
+    }
+
+    let first = decode_ffsf_point(ring_data, 0, minx, miny, spanx, spany);
+    let last = decode_ffsf_point(ring_data, point_count - 1, minx, miny, spanx, spany);
+    let closed = first == last;
+    let limit = if closed { point_count - 1 } else { point_count };
+    let mut min_dist = f64::INFINITY;
+
+    for idx in 0..limit {
+        let (x1, y1) = decode_ffsf_point(ring_data, idx, minx, miny, spanx, spany);
+        let (x2, y2) =
+            decode_ffsf_point(ring_data, (idx + 1) % point_count, minx, miny, spanx, spany);
+        let (nx, ny) = nearest_point_on_segment(lon, lat, x1, y1, x2, y2);
+        let dist = haversine_km(lat, lon, ny, nx);
+        if dist < min_dist {
+            min_dist = dist;
+        }
+    }
+
+    min_dist
+}
+
+fn decode_ffsf_point(
+    ring_data: &[u8],
+    point_idx: usize,
+    minx: f64,
+    miny: f64,
+    spanx: f64,
+    spany: f64,
+) -> (f64, f64) {
+    let offset = point_idx * 4;
+    let qx = f64::from(read_u16_from_slice(ring_data, offset));
+    let qy = f64::from(read_u16_from_slice(ring_data, offset + 2));
+    let x = minx + (qx / 65535.0) * spanx;
+    let y = miny + (qy / 65535.0) * spany;
+    (x, y)
+}
+
+fn nearest_point_on_segment(px: f64, py: f64, x1: f64, y1: f64, x2: f64, y2: f64) -> (f64, f64) {
+    let dx = x2 - x1;
+    let dy = y2 - y1;
+    if dx == 0.0 && dy == 0.0 {
+        return (x1, y1);
+    }
+
+    let t = ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy);
+    if t <= 0.0 {
+        return (x1, y1);
+    }
+    if t >= 1.0 {
+        return (x2, y2);
+    }
+    (x1 + t * dx, y1 + t * dy)
+}
+
+fn haversine_km(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
+    let r = 6371.0;
+    let lat1_r = lat1.to_radians();
+    let lon1_r = lon1.to_radians();
+    let lat2_r = lat2.to_radians();
+    let lon2_r = lon2.to_radians();
+
+    let dlat = lat2_r - lat1_r;
+    let dlon = lon2_r - lon1_r;
+    let a = (dlat / 2.0).sin().powi(2) + lat1_r.cos() * lat2_r.cos() * (dlon / 2.0).sin().powi(2);
+    let c = 2.0 * a.sqrt().asin();
+    r * c
 }
 
 fn read_u16_from_slice(data: &[u8], offset: usize) -> u16 {

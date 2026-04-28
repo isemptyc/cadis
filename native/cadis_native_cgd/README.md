@@ -37,8 +37,20 @@ FFSF Python contract used internally by Cadis:
 from cadis_native_cgd import FfsfRuntimeKernel
 
 kernel = FfsfRuntimeKernel("/path/to/geometry.ffsf", "/path/to/geometry_meta.json")
-kernel.query_point_feature_indices(lon, lat, levels)      # dict[level, feature_index]
-kernel.query_many_feature_indices(lons, lats, levels)     # list[dict[level, feature_index]]
+kernel.query_point_feature_indices(lon, lat, levels)          # dict[level, feature_index]
+kernel.query_many_feature_indices(lons, lats, levels)         # list[dict[level, feature_index]]
+
+# Fallback geometry facts. Cadis keeps policy/result construction in Python.
+kernel.country_scope_contains_point(lon, lat, part_indices)   # bool
+kernel.distance_km_to_country_scope(lon, lat, part_indices)   # float
+kernel.distance_km_to_feature_index(lon, lat, feature_index)  # float
+kernel.query_point_nearest_feature_indices(
+    lon,
+    lat,
+    max_distance_km,
+    levels,
+    part_feature_indices,
+)                                                               # dict[level, feature_index]
 ```
 
 Build in an environment with Rust and maturin:
