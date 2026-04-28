@@ -216,6 +216,27 @@ Country runtime batch execution is also a performance policy. `CADIS_COUNTRY_RUN
 
 Set `CADIS_LOOKUP_TRACE=1` to emit one JSON timing line per `lookup_many()` call on stderr. The trace includes world, offshore, grouping, country runtime readiness, scalar/batch runtime execution, and result-finalization timings.
 
+The trace also includes offshore discovery counters for memory investigations:
+
+```json
+{
+  "counters": {
+    "installed_dataset_count": 24,
+    "candidate_catalog_scan_count": 1,
+    "candidate_metadata_loaded_count": 0,
+    "candidate_runtime_loaded_count": 1,
+    "country_runtime_loaded_count": 0,
+    "allowed_iso2_count": 1
+  },
+  "attributes": {
+    "country_scope_bbox_source": "country_scope_index",
+    "offshore_candidate_iso2s": ["TW"]
+  }
+}
+```
+
+`candidate_catalog_scan_count` is counted after the active allowlist policy is applied. With `allowed_iso2=["TW"]` or `CADIS_ALLOWED_ISO2=TW`, offshore discovery scans only TW candidate catalog entries; without an allowlist, it preserves the global behavior and scans all eligible installed datasets. `candidate_metadata_loaded_count` increments only when Cadis falls back to deriving the country-scope bbox from `geometry_meta.json` and `geometry.ffsf`.
+
 If dataset files change, backend configuration changes, or runtime initialization becomes unstable during a process, cold and warm behavior can diverge. Cadis treats that as an operational consistency issue rather than supported semantic behavior.
 
 ### Native FFSF Geometry

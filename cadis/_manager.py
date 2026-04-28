@@ -109,6 +109,11 @@ class CadisManager:
     def is_iso2_allowed(self, iso2: str) -> bool:
         return self._dataset_policy.allows(iso2)
 
+    def has_runtime_loaded(self, iso2: str) -> bool:
+        normalized_iso2 = iso2.strip().upper()
+        with self._lock:
+            return normalized_iso2 in self._runtime_handles
+
     def get_or_init_global_lookup(self):
         global _SHARED_GLOBAL_LOOKUP
 

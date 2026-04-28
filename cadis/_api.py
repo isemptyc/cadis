@@ -74,6 +74,22 @@ class _OffshoreCandidateDataset:
     iso2: str
     scope_bbox: tuple[float, float, float, float]
     expanded_bbox: tuple[float, float, float, float]
+    bbox_source: str
+
+
+@dataclass(frozen=True)
+class _CountryScopeCatalogEntry:
+    scope_bbox: tuple[float, float, float, float]
+    offshore_max_distance_km: float
+    source: str
+
+
+@dataclass
+class _OffshoreCandidateDiagnostics:
+    installed_dataset_count: int = 0
+    candidate_catalog_scan_count: int = 0
+    candidate_metadata_loaded_count: int = 0
+    bbox_sources: set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -82,6 +98,7 @@ class _LookupManyDiagnostics:
     timings_sec: dict[str, float] = field(default_factory=dict)
     rows_by_iso2: dict[str, int] = field(default_factory=dict)
     runtime_groups: list[dict[str, object]] = field(default_factory=list)
+    attributes: dict[str, object] = field(default_factory=dict)
 
     def inc(self, key: str, amount: int = 1) -> None:
         self.counters[key] = self.counters.get(key, 0) + amount
@@ -95,6 +112,7 @@ class _LookupManyDiagnostics:
             "timings_sec": dict(sorted(self.timings_sec.items())),
             "rows_by_iso2": dict(sorted(self.rows_by_iso2.items())),
             "runtime_groups": list(self.runtime_groups),
+            "attributes": dict(sorted(self.attributes.items())),
         }
 
 
@@ -213,6 +231,19 @@ def _env_int(name: str, default: int) -> int:
     except ValueError:
         return default
     if value < 1:
+        return default
+    return value
+
+
+def _env_int_allow_zero(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if not isinstance(raw, str) or not raw.strip():
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    if value < 0:
         return default
     return value
 
@@ -493,6 +524,102 @@ def _load_offshore_max_distance_km(dataset_dir: str | Path) -> float | None:
     return offshore
 
 
+def _coerce_bbox(raw: object) -> tuple[float, float, float, float] | None:
+    if not isinstance(raw, (list, tuple)) or len(raw) != 4:
+        return None
+    values: list[float] = []
+    for item in raw:
+        if not isinstance(item, (int, float)):
+            return None
+        value = float(item)
+        if not math.isfinite(value):
+            return None
+        values.append(value)
+    minx, miny, maxx, maxy = values
+    if minx > maxx or miny > maxy:
+        return None
+    if miny < -90.0 or maxy > 90.0 or minx < -180.0 or maxx > 180.0:
+        return None
+    return minx, miny, maxx, maxy
+
+
+def _catalog_entry_from_mapping(raw: object, *, source: str) -> _CountryScopeCatalogEntry | None:
+    if not isinstance(raw, dict):
+        return None
+    status = raw.get("status", raw.get("dataset_status"))
+    if isinstance(status, str) and status.strip().lower() not in {"ready", "ok", "active"}:
+        return None
+
+    bbox = (
+        _coerce_bbox(raw.get("country_scope_bbox"))
+        or _coerce_bbox(raw.get("scope_bbox"))
+        or _coerce_bbox(raw.get("bbox"))
+    )
+    if bbox is None:
+        expanded = _coerce_bbox(raw.get("expanded_bbox"))
+        if expanded is not None:
+            bbox = expanded
+    if bbox is None:
+        return None
+
+    offshore: object = raw.get("offshore_max_distance_km")
+    if offshore is None:
+        nearby_policy = raw.get("nearby_policy")
+        if isinstance(nearby_policy, dict):
+            offshore = nearby_policy.get("offshore_max_distance_km")
+    if offshore is None:
+        offshore = 20.0
+    if not isinstance(offshore, (int, float)):
+        return None
+    offshore_km = float(offshore)
+    if not math.isfinite(offshore_km) or offshore_km <= 0:
+        return None
+
+    return _CountryScopeCatalogEntry(
+        scope_bbox=bbox,
+        offshore_max_distance_km=offshore_km,
+        source=source,
+    )
+
+
+def _load_country_scope_catalog_entry(dataset_dir: str | Path, iso2: str) -> _CountryScopeCatalogEntry | None:
+    root = Path(dataset_dir)
+    for filename in ("country_scope_index.json", "dataset_release_manifest.json"):
+        path = root / filename
+        if not path.exists():
+            continue
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+
+        source = filename.removesuffix(".json")
+        if isinstance(raw, list):
+            for item in raw:
+                if not isinstance(item, dict):
+                    continue
+                item_iso2 = item.get("iso2", item.get("country_iso", item.get("country_iso2")))
+                if isinstance(item_iso2, str) and item_iso2.strip().upper() != iso2:
+                    continue
+                entry = _catalog_entry_from_mapping(item, source=source)
+                if entry is not None:
+                    return entry
+            continue
+
+        if not isinstance(raw, dict):
+            continue
+
+        for key in ("country_scope", "country_scope_index", "offshore_candidate", "offshore_candidate_catalog"):
+            entry = _catalog_entry_from_mapping(raw.get(key), source=source)
+            if entry is not None:
+                return entry
+        entry = _catalog_entry_from_mapping(raw, source=source)
+        if entry is not None:
+            return entry
+
+    return None
+
+
 def _parse_version_for_sort(raw: str) -> tuple[int, ...]:
     value = raw.strip()
     if value.startswith("v"):
@@ -540,7 +667,7 @@ def _offshore_candidate_iso2(
     lon: float,
     cache_dir: str | Path | None = None,
 ) -> list[str]:
-    max_candidates = _env_int("CADIS_OFFSHORE_MAX_CANDIDATES", OFFSHORE_MAX_CANDIDATES)
+    max_candidates = _env_int_allow_zero("CADIS_OFFSHORE_MAX_CANDIDATES", OFFSHORE_MAX_CANDIDATES)
 
     candidates: list[tuple[float, str]] = []
     for candidate in _offshore_candidate_datasets(manager=manager, cache_dir=cache_dir):
@@ -562,25 +689,42 @@ def _offshore_candidate_datasets(
     *,
     manager: Any,
     cache_dir: str | Path | None = None,
+    diagnostics: _OffshoreCandidateDiagnostics | None = None,
 ) -> list[_OffshoreCandidateDataset]:
     margin_km = _env_float("CADIS_OFFSHORE_CANDIDATE_MARGIN_KM", OFFSHORE_CANDIDATE_MARGIN_KM)
     candidates: list[_OffshoreCandidateDataset] = []
-    for iso2 in _installed_iso2_from_cache(cache_dir=cache_dir):
+    installed_iso2 = _installed_iso2_from_cache(cache_dir=cache_dir)
+    if diagnostics is not None:
+        diagnostics.installed_dataset_count = len(installed_iso2)
+    for iso2 in installed_iso2:
         if not manager.is_iso2_allowed(iso2):
             continue
+        if diagnostics is not None:
+            diagnostics.candidate_catalog_scan_count += 1
         dataset_dir = _latest_dataset_dir_for_iso2(iso2, cache_dir=cache_dir)
         if dataset_dir is None:
             continue
 
         try:
-            offshore_km = _load_offshore_max_distance_km(dataset_dir)
-            if offshore_km is None:
-                continue
-            scope_bbox = _country_scope_bbox_from_dataset(dataset_dir)
+            catalog_entry = _load_country_scope_catalog_entry(dataset_dir, iso2)
+            if catalog_entry is not None:
+                offshore_km = catalog_entry.offshore_max_distance_km
+                scope_bbox = catalog_entry.scope_bbox
+                bbox_source = catalog_entry.source
+            else:
+                offshore_km = _load_offshore_max_distance_km(dataset_dir)
+                if offshore_km is None:
+                    continue
+                scope_bbox = _country_scope_bbox_from_dataset(dataset_dir)
+                bbox_source = "geometry_meta"
+                if diagnostics is not None:
+                    diagnostics.candidate_metadata_loaded_count += 1
         except Exception:
             continue
         if scope_bbox is None:
             continue
+        if diagnostics is not None:
+            diagnostics.bbox_sources.add(bbox_source)
         candidates.append(
             _OffshoreCandidateDataset(
                 iso2=iso2,
@@ -589,6 +733,7 @@ def _offshore_candidate_datasets(
                     scope_bbox,
                     distance_km=float(offshore_km) + margin_km,
                 ),
+                bbox_source=bbox_source,
             )
         )
     return sorted(candidates, key=lambda item: item.iso2)
@@ -600,7 +745,7 @@ def _offshore_candidate_iso2_from_datasets(
     lat: float,
     lon: float,
 ) -> list[str]:
-    max_candidates = _env_int("CADIS_OFFSHORE_MAX_CANDIDATES", OFFSHORE_MAX_CANDIDATES)
+    max_candidates = _env_int_allow_zero("CADIS_OFFSHORE_MAX_CANDIDATES", OFFSHORE_MAX_CANDIDATES)
     candidates: list[tuple[float, str]] = []
     for candidate in candidate_datasets:
         distance_km = _point_to_bbox_distance_km(lat=lat, lon=lon, bbox=candidate.expanded_bbox)
@@ -847,6 +992,7 @@ def _lookup_country_rows(
         diagnostics.inc("runtime_group_rows", len(rows))
         diagnostics.runtime_groups.append({"iso2": iso2, "rows": len(rows)})
     readiness_start = time.perf_counter()
+    was_loaded = bool(getattr(manager, "has_runtime_loaded", lambda _iso2: False)(iso2))
     try:
         runtime_handle, dataset_state = manager.get_runtime_readiness(iso2, cache_dir=cache_dir)
     except Exception:
@@ -863,6 +1009,8 @@ def _lookup_country_rows(
 
     if diagnostics is not None:
         diagnostics.add_time("country_runtime_readiness", time.perf_counter() - readiness_start)
+        if runtime_handle is not None and not was_loaded:
+            diagnostics.inc("country_runtime_loaded_count")
 
     if runtime_handle is None:
         missing_start = time.perf_counter()
@@ -1003,9 +1151,25 @@ def _resolve_open_sea_lookup_rows(
     diagnostics: _LookupManyDiagnostics | None = None,
     runtime_cache_policy: str | None = None,
 ) -> list[_ResolvedLookupRecord]:
-    candidate_datasets = _offshore_candidate_datasets(manager=manager, cache_dir=cache_dir)
+    candidate_diagnostics = _OffshoreCandidateDiagnostics()
+    candidate_datasets = _offshore_candidate_datasets(
+        manager=manager,
+        cache_dir=cache_dir,
+        diagnostics=candidate_diagnostics,
+    )
     if diagnostics is not None:
+        diagnostics.counters["installed_dataset_count"] = candidate_diagnostics.installed_dataset_count
+        diagnostics.counters["candidate_catalog_scan_count"] = (
+            candidate_diagnostics.candidate_catalog_scan_count
+        )
+        diagnostics.counters["candidate_metadata_loaded_count"] = (
+            candidate_diagnostics.candidate_metadata_loaded_count
+        )
         diagnostics.counters["offshore_candidate_dataset_count"] = len(candidate_datasets)
+        diagnostics.counters["allowed_iso2_count"] = len(getattr(manager.dataset_policy, "allowed_iso2", ()))
+        sources = sorted(candidate_diagnostics.bbox_sources)
+        diagnostics.attributes["country_scope_bbox_source"] = ",".join(sources) if sources else "none"
+        diagnostics.attributes["offshore_candidate_iso2s"] = [item.iso2 for item in candidate_datasets]
 
     candidate_iso2_by_index: dict[int, list[str]] = {}
     candidate_union: set[str] = set()
@@ -1030,6 +1194,7 @@ def _resolve_open_sea_lookup_rows(
     for iso2 in sorted(candidate_union):
         if diagnostics is not None:
             diagnostics.inc("offshore_runtime_groups_considered")
+        was_loaded = bool(getattr(manager, "has_runtime_loaded", lambda _iso2: False)(iso2))
         try:
             runtime_handle = None
             dataset_state = None
@@ -1038,6 +1203,8 @@ def _resolve_open_sea_lookup_rows(
             except Exception:
                 runtime_handle = None
             if runtime_handle is not None and isinstance(dataset_state, dict) and dataset_state.get("status") == "ready":
+                if diagnostics is not None and not was_loaded:
+                    diagnostics.inc("candidate_runtime_loaded_count")
                 pipeline = getattr(getattr(runtime_handle, "runtime", None), "_pipeline", None)
                 policy = getattr(pipeline, "policy", None)
                 offshore_km = getattr(policy, "offshore_max_distance_km", None)
@@ -1132,6 +1299,18 @@ def _lookup_many_impl(
     runtime_cache_policy: str | None = None,
 ) -> list[LookupManyResponseItem]:
     total_start = time.perf_counter()
+    if diagnostics is not None:
+        for key in (
+            "installed_dataset_count",
+            "candidate_catalog_scan_count",
+            "candidate_metadata_loaded_count",
+            "candidate_runtime_loaded_count",
+            "country_runtime_loaded_count",
+            "allowed_iso2_count",
+        ):
+            diagnostics.counters.setdefault(key, 0)
+        diagnostics.attributes.setdefault("country_scope_bbox_source", "none")
+        diagnostics.attributes.setdefault("offshore_candidate_iso2s", [])
     if runtime_cache_policy is not None:
         _use_batch_runtime_release(runtime_cache_policy=runtime_cache_policy, country_count=0)
     rows = list(points)
@@ -1161,6 +1340,8 @@ def _lookup_many_impl(
 
     manager_start = time.perf_counter()
     manager = get_manager(cache_dir=cache_dir, allowed_iso2=allowed_iso2)
+    if diagnostics is not None:
+        diagnostics.counters["allowed_iso2_count"] = len(getattr(manager.dataset_policy, "allowed_iso2", ()))
     try:
         global_lookup = manager.get_or_init_global_lookup()
     except Exception:
