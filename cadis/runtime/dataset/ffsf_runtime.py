@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import struct
@@ -15,6 +16,9 @@ except ModuleNotFoundError:
     class Point:  # type: ignore[override]
         x: float
         y: float
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _round_half_up(value: float) -> int:
@@ -380,6 +384,30 @@ def _requested_ffsf_fallback_geometry() -> str:
     return backend
 
 
+def _requested_ffsf_fallback_geometry_shadow() -> bool:
+    raw = os.environ.get("CADIS_FFSF_FALLBACK_GEOMETRY_SHADOW", "")
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _fallback_geometry_shadow_distance_tolerance_km() -> float:
+    raw = os.environ.get("CADIS_FFSF_FALLBACK_GEOMETRY_SHADOW_DISTANCE_TOLERANCE_KM")
+    if raw is None:
+        return 1e-6
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValueError(
+            "CADIS_FFSF_FALLBACK_GEOMETRY_SHADOW_DISTANCE_TOLERANCE_KM "
+            "must be a finite non-negative number"
+        ) from exc
+    if not math.isfinite(value) or value < 0:
+        raise ValueError(
+            "CADIS_FFSF_FALLBACK_GEOMETRY_SHADOW_DISTANCE_TOLERANCE_KM "
+            "must be a finite non-negative number"
+        )
+    return value
+
+
 def _load_native_ffsf_kernel() -> type[Any]:
     from cadis_native_cgd import FfsfRuntimeKernel
 
@@ -494,6 +522,15 @@ class FFSFSpatialIndexV3:
             requested_fallback_geometry
             if native_kernel is not None
             else "python"
+        )
+        self._fallback_geometry_shadow_enabled = (
+            native_kernel is not None
+            and _requested_ffsf_fallback_geometry_shadow()
+        )
+        self._fallback_geometry_shadow_distance_tolerance_km = (
+            _fallback_geometry_shadow_distance_tolerance_km()
+            if self._fallback_geometry_shadow_enabled
+            else 1e-6
         )
 
         if len(self.feature_index) != len(self.feature_meta_by_index):
@@ -691,15 +728,132 @@ class FFSFSpatialIndexV3:
         if max_distance_km <= 0:
             return {}
         if self._use_native_fallback_geometry():
-            native_hits = self.native_kernel.query_point_nearest_feature_indices(
+            raw_hits = self._native_query_point_nearest_feature_indices(
+                pt,
+                max_distance_km=max_distance_km,
+                levels=levels,
+            )
+        else:
+            raw_hits = self._python_query_point_nearest_feature_indices(
+                pt,
+                max_distance_km=max_distance_km,
+                levels=levels,
+            )
+        self._shadow_compare_nearest_feature_candidates(
+            pt,
+            max_distance_km=max_distance_km,
+            levels=levels,
+            production=raw_hits,
+        )
+        return self._feature_indices_to_hits(raw_hits, source="nearby")
+
+    def has_country_scope_geometry(self) -> bool:
+        return bool(self.country_scope_part_indices)
+
+    def country_scope_contains_point(self, pt: Point) -> bool:
+        if self._use_native_fallback_geometry():
+            result = self._native_country_scope_contains_point(pt)
+        else:
+            result = self._python_country_scope_contains_point(pt)
+        self._shadow_compare_country_scope_contains(pt, production=result)
+        return result
+
+    def _python_country_scope_contains_point(self, pt: Point) -> bool:
+        for part_idx in self.country_scope_part_indices:
+            if self._part_contains_point(part_idx, pt):
+                return True
+        return False
+
+    def _native_country_scope_contains_point(self, pt: Point) -> bool:
+        return bool(
+            self.native_kernel.country_scope_contains_point(
                 float(pt.x),
                 float(pt.y),
-                float(max_distance_km),
-                levels,
-                self.part_feature_index,
+                self.country_scope_part_indices,
             )
-            return self._feature_indices_to_hits(native_hits, source="nearby")
+        )
 
+    def distance_km_to_country_scope(self, pt: Point) -> float:
+        if not self.country_scope_part_indices:
+            return float("inf")
+        if self._use_native_fallback_geometry():
+            result = self._native_distance_km_to_country_scope(pt)
+        else:
+            result = self._python_distance_km_to_country_scope(pt)
+        self._shadow_compare_distance(
+            "country_scope_distance",
+            pt,
+            production=result,
+            python_value_getter=lambda: self._python_distance_km_to_country_scope(pt),
+            native_value_getter=lambda: self._native_distance_km_to_country_scope(pt),
+        )
+        return result
+
+    def _python_distance_km_to_country_scope(self, pt: Point) -> float:
+        if self._python_country_scope_contains_point(pt):
+            return 0.0
+
+        min_dist = float("inf")
+        for part_idx in self.country_scope_part_indices:
+            minx, miny, maxx, maxy = self.part_bboxes[part_idx]
+            dist = self._distance_km_to_part(pt, part_idx, minx, miny, maxx, maxy)
+            if dist < min_dist:
+                min_dist = dist
+        return min_dist
+
+    def _native_distance_km_to_country_scope(self, pt: Point) -> float:
+        return float(
+            self.native_kernel.distance_km_to_country_scope(
+                float(pt.x),
+                float(pt.y),
+                self.country_scope_part_indices,
+            )
+        )
+
+    def distance_km_to_feature_id(self, pt: Point, feature_id: str) -> float:
+        feature_idx = self.feature_id_to_index.get(feature_id)
+        if feature_idx is None:
+            return float("inf")
+        if self._use_native_fallback_geometry():
+            result = self._native_distance_km_to_feature_index(pt, feature_idx)
+        else:
+            result = self._python_distance_km_to_feature_index(pt, feature_idx)
+        self._shadow_compare_distance(
+            "feature_distance",
+            pt,
+            production=result,
+            python_value_getter=lambda: self._python_distance_km_to_feature_index(pt, feature_idx),
+            native_value_getter=lambda: self._native_distance_km_to_feature_index(pt, feature_idx),
+            extra={"feature_id": feature_id, "feature_idx": feature_idx},
+        )
+        return result
+
+    def _python_distance_km_to_feature_index(self, pt: Point, feature_idx: int) -> float:
+        feature = self.feature_index[feature_idx]
+        min_dist = float("inf")
+        for part_idx in range(feature.part_start_idx, feature.part_start_idx + feature.part_count):
+            minx, miny, maxx, maxy = self.part_bboxes[part_idx]
+            dist = self._distance_km_to_part(pt, part_idx, minx, miny, maxx, maxy)
+            if dist < min_dist:
+                min_dist = dist
+        return min_dist
+
+    def _native_distance_km_to_feature_index(self, pt: Point, feature_idx: int) -> float:
+        return float(
+            self.native_kernel.distance_km_to_feature_index(
+                float(pt.x),
+                float(pt.y),
+                feature_idx,
+            )
+        )
+
+    def _python_query_point_nearest_feature_indices(
+        self,
+        pt: Point,
+        *,
+        max_distance_km: float,
+        levels: list[int],
+    ) -> dict[int, int]:
         level_set = set(levels)
         max_km = float(max_distance_km)
         threshold_deg = max_km / 111.0
@@ -709,7 +863,7 @@ class FFSFSpatialIndexV3:
         qminy = pt.y - threshold_deg
         qmaxy = pt.y + threshold_deg
 
-        nearest_by_level: dict[int, tuple[float, dict]] = {}
+        nearest_by_level: dict[int, tuple[float, int]] = {}
 
         for part_idx, (minx, miny, maxx, maxy) in enumerate(self.part_bboxes):
             if maxx < qminx or minx > qmaxx or maxy < qminy or miny > qmaxy:
@@ -729,77 +883,234 @@ class FFSFSpatialIndexV3:
 
             best = nearest_by_level.get(level)
             if best is None or dist_km < best[0]:
-                nearest_by_level[level] = (dist_km, meta)
+                nearest_by_level[level] = (dist_km, feature_idx)
 
-        hits: dict[int, dict] = {}
-        for level, (_, meta) in nearest_by_level.items():
-            hits[level] = _build_public_feature_hit(
-                level=level,
-                meta=meta,
-                source="nearby",
-            )
+        return {level: feature_idx for level, (_, feature_idx) in nearest_by_level.items()}
 
+    def _native_query_point_nearest_feature_indices(
+        self,
+        pt: Point,
+        *,
+        max_distance_km: float,
+        levels: list[int],
+    ) -> dict[int, int]:
+        native_hits = self.native_kernel.query_point_nearest_feature_indices(
+            float(pt.x),
+            float(pt.y),
+            float(max_distance_km),
+            levels,
+            self.part_feature_index,
+        )
+        if not isinstance(native_hits, dict):
+            return {}
+        hits: dict[int, int] = {}
+        for raw_level, raw_feature_idx in native_hits.items():
+            if isinstance(raw_level, int) and isinstance(raw_feature_idx, int):
+                hits[raw_level] = raw_feature_idx
         return hits
 
-    def has_country_scope_geometry(self) -> bool:
-        return bool(self.country_scope_part_indices)
+    def _shadow_compare_country_scope_contains(
+        self,
+        pt: Point,
+        *,
+        production: bool,
+    ) -> None:
+        if not self._fallback_geometry_shadow_enabled:
+            return
+        self._run_shadow_compare(
+            "country_scope_contains",
+            pt,
+            production=production,
+            compare=lambda: self._compare_boolean_fact(
+                python_value=self._python_country_scope_contains_point(pt),
+                native_value=self._native_country_scope_contains_point(pt),
+            ),
+        )
 
-    def country_scope_contains_point(self, pt: Point) -> bool:
-        if self._use_native_fallback_geometry():
-            return bool(
-                self.native_kernel.country_scope_contains_point(
-                    float(pt.x),
-                    float(pt.y),
-                    self.country_scope_part_indices,
-                )
+    def _shadow_compare_distance(
+        self,
+        operation: str,
+        pt: Point,
+        *,
+        production: float,
+        python_value_getter,
+        native_value_getter,
+        extra: dict | None = None,
+    ) -> None:
+        if not self._fallback_geometry_shadow_enabled:
+            return
+        self._run_shadow_compare(
+            operation,
+            pt,
+            production=production,
+            extra=extra,
+            compare=lambda: self._compare_distance_fact(
+                python_value=float(python_value_getter()),
+                native_value=float(native_value_getter()),
+            ),
+        )
+
+    def _shadow_compare_nearest_feature_candidates(
+        self,
+        pt: Point,
+        *,
+        max_distance_km: float,
+        levels: list[int],
+        production: dict[int, int],
+    ) -> None:
+        if not self._fallback_geometry_shadow_enabled:
+            return
+        self._run_shadow_compare(
+            "nearest_feature_candidates",
+            pt,
+            production=production,
+            extra={
+                "max_distance_km": float(max_distance_km),
+                "levels": list(levels),
+            },
+            compare=lambda: self._compare_candidate_fact(
+                python_value=self._python_query_point_nearest_feature_indices(
+                    pt,
+                    max_distance_km=max_distance_km,
+                    levels=levels,
+                ),
+                native_value=self._native_query_point_nearest_feature_indices(
+                    pt,
+                    max_distance_km=max_distance_km,
+                    levels=levels,
+                ),
+            ),
+        )
+
+    def _run_shadow_compare(
+        self,
+        operation: str,
+        pt: Point,
+        *,
+        production: object,
+        compare,
+        extra: dict | None = None,
+    ) -> None:
+        try:
+            severity, diff = compare()
+        except Exception as exc:
+            self._emit_fallback_geometry_shadow_diff(
+                operation=operation,
+                pt=pt,
+                severity=3,
+                production=production,
+                diff={"error": repr(exc)},
+                extra=extra,
             )
-        for part_idx in self.country_scope_part_indices:
-            if self._part_contains_point(part_idx, pt):
-                return True
-        return False
+            return
+        if severity == 0:
+            return
+        self._emit_fallback_geometry_shadow_diff(
+            operation=operation,
+            pt=pt,
+            severity=severity,
+            production=production,
+            diff=diff,
+            extra=extra,
+        )
 
-    def distance_km_to_country_scope(self, pt: Point) -> float:
-        if not self.country_scope_part_indices:
-            return float("inf")
-        if self._use_native_fallback_geometry():
-            return float(
-                self.native_kernel.distance_km_to_country_scope(
-                    float(pt.x),
-                    float(pt.y),
-                    self.country_scope_part_indices,
-                )
-            )
-        if self.country_scope_contains_point(pt):
-            return 0.0
+    def _compare_boolean_fact(
+        self,
+        *,
+        python_value: bool,
+        native_value: bool,
+    ) -> tuple[int, dict]:
+        if python_value == native_value:
+            return 0, {}
+        return 3, {
+            "python": python_value,
+            "native": native_value,
+            "reason": "classification_mismatch",
+        }
 
-        min_dist = float("inf")
-        for part_idx in self.country_scope_part_indices:
-            minx, miny, maxx, maxy = self.part_bboxes[part_idx]
-            dist = self._distance_km_to_part(pt, part_idx, minx, miny, maxx, maxy)
-            if dist < min_dist:
-                min_dist = dist
-        return min_dist
+    def _compare_distance_fact(
+        self,
+        *,
+        python_value: float,
+        native_value: float,
+    ) -> tuple[int, dict]:
+        if python_value == native_value or (
+            math.isinf(python_value) and math.isinf(native_value)
+        ):
+            return 0, {}
+        delta = abs(python_value - native_value)
+        tolerance = self._fallback_geometry_shadow_distance_tolerance_km
+        if delta <= tolerance:
+            severity = 1
+            reason = "numeric_diff_within_tolerance"
+        else:
+            severity = 3
+            reason = "distance_mismatch_outside_tolerance"
+        return severity, {
+            "python": python_value,
+            "native": native_value,
+            "delta_km": delta,
+            "tolerance_km": tolerance,
+            "reason": reason,
+        }
 
-    def distance_km_to_feature_id(self, pt: Point, feature_id: str) -> float:
-        feature_idx = self.feature_id_to_index.get(feature_id)
-        if feature_idx is None:
-            return float("inf")
-        if self._use_native_fallback_geometry():
-            return float(
-                self.native_kernel.distance_km_to_feature_index(
-                    float(pt.x),
-                    float(pt.y),
-                    feature_idx,
-                )
-            )
-        feature = self.feature_index[feature_idx]
-        min_dist = float("inf")
-        for part_idx in range(feature.part_start_idx, feature.part_start_idx + feature.part_count):
-            minx, miny, maxx, maxy = self.part_bboxes[part_idx]
-            dist = self._distance_km_to_part(pt, part_idx, minx, miny, maxx, maxy)
-            if dist < min_dist:
-                min_dist = dist
-        return min_dist
+    def _compare_candidate_fact(
+        self,
+        *,
+        python_value: dict[int, int],
+        native_value: dict[int, int],
+    ) -> tuple[int, dict]:
+        if python_value == native_value:
+            return 0, {}
+        python_levels = sorted(python_value)
+        native_levels = sorted(native_value)
+        if python_levels != native_levels:
+            return 3, {
+                "python": python_value,
+                "native": native_value,
+                "python_levels": python_levels,
+                "native_levels": native_levels,
+                "reason": "classification_mismatch",
+            }
+        return 2, {
+            "python": python_value,
+            "native": native_value,
+            "levels": python_levels,
+            "reason": "candidate_diff_same_classification",
+        }
+
+    def _emit_fallback_geometry_shadow_diff(
+        self,
+        *,
+        operation: str,
+        pt: Point,
+        severity: int,
+        production: object,
+        diff: dict,
+        extra: dict | None = None,
+    ) -> None:
+        payload = {
+            "event": "ffsf_fallback_geometry_shadow_diff",
+            "operation": operation,
+            "severity": severity,
+            "severity_label": {
+                1: "numeric_diff_within_tolerance",
+                2: "candidate_diff_same_classification",
+                3: "classification_mismatch",
+            }.get(severity, "identical"),
+            "lon": float(pt.x),
+            "lat": float(pt.y),
+            "production_backend": self.fallback_geometry_backend_name,
+            "production": production,
+            "diff": diff,
+        }
+        if extra:
+            payload.update(extra)
+        log_method = _LOGGER.warning if severity >= 2 else _LOGGER.info
+        log_method(
+            "[FFSFNativeFallbackGeometryShadow] %s",
+            json.dumps(payload, sort_keys=True),
+        )
 
     def build_country_scope_allowlist(
         self,

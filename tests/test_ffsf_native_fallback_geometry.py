@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import math
+import struct
 
 import pytest
 
@@ -38,6 +40,42 @@ class _NativeFallbackKernel:
         return {4: 0}
 
 
+class _ShadowNativeKernel:
+    backend_name = "native"
+
+    def __init__(
+        self,
+        *,
+        contains=False,
+        country_distance_km=0.0,
+        feature_distance_km=0.0,
+        nearest=None,
+    ):
+        self._contains = contains
+        self._country_distance_km = country_distance_km
+        self._feature_distance_km = feature_distance_km
+        self._nearest = nearest if nearest is not None else {}
+
+    def country_scope_contains_point(self, lon, lat, part_indices):
+        return self._contains
+
+    def distance_km_to_country_scope(self, lon, lat, part_indices):
+        return self._country_distance_km
+
+    def distance_km_to_feature_index(self, lon, lat, feature_idx):
+        return self._feature_distance_km
+
+    def query_point_nearest_feature_indices(
+        self,
+        lon,
+        lat,
+        max_distance_km,
+        levels,
+        part_feature_indices,
+    ):
+        return self._nearest
+
+
 def _index(native_kernel) -> FFSFSpatialIndexV3:
     return FFSFSpatialIndexV3(
         feature_index=[FeatureIndexEntry(part_start_idx=0, part_count=1)],
@@ -62,6 +100,58 @@ def _index(native_kernel) -> FFSFSpatialIndexV3:
         ],
         native_kernel=native_kernel,
     )
+
+
+def _square_index(native_kernel, *, feature_count=1) -> FFSFSpatialIndexV3:
+    ring = [(0, 0), (65535, 0), (65535, 65535), (0, 65535), (0, 0)]
+    geometry_data = struct.pack("<" + "H" * 10, *(coord for point in ring for coord in point))
+    feature_index = []
+    part_bboxes = []
+    geom_index = []
+    ring_index = []
+    feature_meta_by_index = []
+    offset = 0
+    for feature_idx in range(feature_count):
+        feature_index.append(FeatureIndexEntry(part_start_idx=feature_idx, part_count=1))
+        shift = float(feature_idx * 10)
+        part_bboxes.append((shift, 0.0, shift + 1.0, 1.0))
+        geom_index.append(
+            GeomIndexV2Entry(
+                byte_offset=offset,
+                byte_len=len(geometry_data),
+                ring_start_idx=feature_idx,
+                ring_count=1,
+            )
+        )
+        ring_index.append(len(ring))
+        feature_meta_by_index.append(
+            {
+                "feature_id": f"feature-{feature_idx}",
+                "level": 4,
+                "name": f"Feature {feature_idx}",
+                "country_scope_flag": feature_idx == 0,
+            }
+        )
+        offset += len(geometry_data)
+    return FFSFSpatialIndexV3(
+        feature_index=feature_index,
+        part_bboxes=part_bboxes,
+        geom_index=geom_index,
+        ring_index=ring_index,
+        geometry_data=memoryview(geometry_data * feature_count),
+        feature_meta_by_index=feature_meta_by_index,
+        native_kernel=native_kernel,
+    )
+
+
+def _shadow_payloads(caplog):
+    payloads = []
+    for record in caplog.records:
+        marker = "[FFSFNativeFallbackGeometryShadow] "
+        message = record.getMessage()
+        if marker in message:
+            payloads.append(json.loads(message.split(marker, 1)[1]))
+    return payloads
 
 
 def test_native_fallback_geometry_routes_geometry_facts(monkeypatch):
@@ -97,3 +187,63 @@ def test_native_fallback_geometry_requires_native_runtime(monkeypatch):
 
     with pytest.raises(RuntimeError, match="requires a native FFSF runtime"):
         _index(None)
+
+
+def test_fallback_geometry_shadow_logs_classification_mismatch_without_affecting_output(
+    monkeypatch,
+    caplog,
+):
+    monkeypatch.setenv("CADIS_FFSF_FALLBACK_GEOMETRY", "python")
+    monkeypatch.setenv("CADIS_FFSF_FALLBACK_GEOMETRY_SHADOW", "1")
+    index = _index(_ShadowNativeKernel(contains=True))
+
+    with caplog.at_level("INFO", logger="cadis.runtime.dataset.ffsf_runtime"):
+        assert index.country_scope_contains_point(Point(10.0, 20.0)) is False
+
+    payloads = _shadow_payloads(caplog)
+    assert payloads[0]["operation"] == "country_scope_contains"
+    assert payloads[0]["severity"] == 3
+    assert payloads[0]["diff"]["reason"] == "classification_mismatch"
+    assert payloads[0]["production_backend"] == "python"
+
+
+def test_fallback_geometry_shadow_logs_distance_diff_within_tolerance(
+    monkeypatch,
+    caplog,
+):
+    monkeypatch.setenv("CADIS_FFSF_FALLBACK_GEOMETRY", "python")
+    monkeypatch.setenv("CADIS_FFSF_FALLBACK_GEOMETRY_SHADOW", "1")
+    monkeypatch.setenv("CADIS_FFSF_FALLBACK_GEOMETRY_SHADOW_DISTANCE_TOLERANCE_KM", "0.001")
+    index = _square_index(_ShadowNativeKernel(contains=True, country_distance_km=0.0005))
+
+    with caplog.at_level("INFO", logger="cadis.runtime.dataset.ffsf_runtime"):
+        assert index.distance_km_to_country_scope(Point(0.5, 0.5)) == 0.0
+
+    payloads = _shadow_payloads(caplog)
+    assert payloads[0]["operation"] == "country_scope_distance"
+    assert payloads[0]["severity"] == 1
+    assert payloads[0]["diff"]["reason"] == "numeric_diff_within_tolerance"
+
+
+def test_fallback_geometry_shadow_logs_candidate_diff_same_classification(
+    monkeypatch,
+    caplog,
+):
+    monkeypatch.setenv("CADIS_FFSF_FALLBACK_GEOMETRY", "python")
+    monkeypatch.setenv("CADIS_FFSF_FALLBACK_GEOMETRY_SHADOW", "1")
+    index = _square_index(_ShadowNativeKernel(nearest={4: 1}), feature_count=2)
+
+    with caplog.at_level("INFO", logger="cadis.runtime.dataset.ffsf_runtime"):
+        assert index.query_point_nearest(Point(0.5, 0.5), max_distance_km=2000.0, levels=[4]) == {
+            4: {
+                "level": 4,
+                "name": "Feature 0",
+                "osm_id": "feature-0",
+                "source": "nearby",
+            }
+        }
+
+    payloads = _shadow_payloads(caplog)
+    assert payloads[0]["operation"] == "nearest_feature_candidates"
+    assert payloads[0]["severity"] == 2
+    assert payloads[0]["diff"]["reason"] == "candidate_diff_same_classification"
