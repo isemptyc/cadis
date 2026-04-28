@@ -1,6 +1,6 @@
-# Native FFSF Runtime in Cadis 0.7.1
+# Native FFSF Runtime in Cadis 0.8.0
 
-Cadis 0.7.1 promotes native FFSF fallback geometry to the default path when
+Cadis 0.8.0 promotes native FFSF fallback geometry to the default path when
 the optional `cadis_native_cgd` module is installed.
 
 The public Cadis package remains Python-only. Native geometry is an optional
