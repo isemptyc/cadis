@@ -31,7 +31,7 @@ from .version import __version__
 
 SCHEMA_VERSION = "1"
 VERSION = __version__
-SUPPORTED_ISO2 = ["JP", "TW", "GB", "IT", "KR", "SE", "NO", "DK", "BE", "NL", "FR", "DE", "ES", "PT", "FI", "US", "CA", "AU"]
+SUPPORTED_ISO2 = ["JP", "TW", "GB", "IT", "KR", "SE", "NO", "DK", "BE", "NL", "FR", "DE", "ES", "PT", "FI", "US", "CA", "AU", "NZ"]
 DATASET_ISO2_ALIASES = {
     "PR": "US",
     "VI": "US",
