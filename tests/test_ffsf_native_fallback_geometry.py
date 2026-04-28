@@ -229,6 +229,7 @@ def test_from_files_skips_python_geometry_parse_in_native_compact_mode(monkeypat
     ffsf_path, meta_path = _write_minimal_ffsf_dataset(tmp_path)
     monkeypatch.delenv("CADIS_FFSF_FALLBACK_GEOMETRY", raising=False)
     monkeypatch.delenv("CADIS_FFSF_FALLBACK_GEOMETRY_SHADOW", raising=False)
+    monkeypatch.delenv("CADIS_TRIM_FEATURE_META", raising=False)
     monkeypatch.setattr(
         ffsf_mod,
         "_create_native_ffsf_kernel",
@@ -249,6 +250,95 @@ def test_from_files_skips_python_geometry_parse_in_native_compact_mode(monkeypat
     assert index.geom_index == []
     assert index.ring_index == []
     assert bytes(index.geometry_data) == b""
+
+
+def test_from_files_trims_feature_meta_by_default(monkeypatch, tmp_path):
+    ffsf_path, meta_path = _write_minimal_ffsf_dataset(tmp_path)
+    meta_path.write_text(
+        json.dumps(
+            [
+                {
+                    "feature_id": "feature-1",
+                    "level": 4,
+                    "name": "Feature 1",
+                    "names": {"en": "Feature 1", "zh": "Feature One"},
+                    "country_scope_flag": True,
+                    "unused_bbox": [0.0, 0.0, 1.0, 1.0],
+                    "unused_rank": 123,
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CADIS_FFSF_BACKEND", "python")
+    monkeypatch.delenv("CADIS_TRIM_FEATURE_META", raising=False)
+
+    index = FFSFSpatialIndexV3.from_files(
+        ffsf_path=ffsf_path,
+        feature_meta_path=meta_path,
+    )
+
+    assert index.feature_meta_by_index == [
+        {
+            "feature_id": "feature-1",
+            "level": 4,
+            "name": "Feature 1",
+            "names": {"en": "Feature 1", "zh": "Feature One"},
+            "country_scope_flag": True,
+        }
+    ]
+    report = index.memory_report()
+    assert report["feature_meta_total_key_count"] == 5
+    assert report["feature_meta_unique_feature_id_count"] == 1
+    assert report["feature_meta_unique_name_count"] == 1
+    assert report["feature_meta_unique_localized_name_count"] == 2
+    assert report["feature_meta_json_bytes"] < len(meta_path.read_bytes())
+
+
+def test_feature_meta_trim_can_be_disabled(monkeypatch, tmp_path):
+    ffsf_path, meta_path = _write_minimal_ffsf_dataset(tmp_path)
+    meta_path.write_text(
+        json.dumps(
+            [
+                {
+                    "feature_id": "feature-1",
+                    "level": 4,
+                    "name": "Feature 1",
+                    "country_scope_flag": True,
+                    "unused_rank": 123,
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CADIS_FFSF_BACKEND", "python")
+    monkeypatch.setenv("CADIS_TRIM_FEATURE_META", "off")
+
+    index = FFSFSpatialIndexV3.from_files(
+        ffsf_path=ffsf_path,
+        feature_meta_path=meta_path,
+    )
+
+    assert index.feature_meta_by_index[0]["unused_rank"] == 123
+    assert index.memory_report()["feature_meta_total_key_count"] == 5
+
+
+def test_memory_report_exposes_released_geometry_counts(monkeypatch):
+    monkeypatch.delenv("CADIS_FFSF_FALLBACK_GEOMETRY", raising=False)
+    index = _index(_NativeFallbackKernel())
+
+    report = index.memory_report()
+
+    assert report["backend_name"] == "native"
+    assert report["fallback_geometry_backend_name"] == "native"
+    assert report["python_geometry_retained"] is False
+    assert report["feature_count"] == 1
+    assert report["part_count"] == 1
+    assert report["feature_index_count"] == 0
+    assert report["part_bbox_count"] == 0
+    assert report["geom_index_count"] == 0
+    assert report["ring_index_count"] == 0
+    assert report["geometry_data_bytes"] == 0
 
 
 def test_from_files_retains_python_geometry_for_shadow(monkeypatch, tmp_path):

@@ -286,8 +286,14 @@ class CadisManager:
     def memory_report(self) -> dict[str, Any]:
         """Return lightweight runtime-cache diagnostics for memory investigations."""
         with self._lock:
-            runtimes = {
-                iso2: {
+            runtimes: dict[str, dict[str, Any]] = {}
+            for iso2, handle in self._runtime_handles.items():
+                runtime_report = (
+                    handle.runtime.memory_report()
+                    if hasattr(handle.runtime, "memory_report")
+                    else {}
+                )
+                runtimes[iso2] = {
                     "dataset_dir": handle.dataset_dir,
                     "dataset_status": handle.dataset_state.get("status"),
                     "backend_name": getattr(
@@ -295,9 +301,8 @@ class CadisManager:
                         "backend_name",
                         None,
                     ),
+                    **runtime_report,
                 }
-                for iso2, handle in self._runtime_handles.items()
-            }
             return {
                 "runtime_cache_capacity": self._runtime_cache_capacity,
                 "runtime_count": len(self._runtime_handles),

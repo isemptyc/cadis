@@ -18,3 +18,6 @@ class CadisRuntime:
 
     def lookup_many(self, points: Iterable[object]) -> list[LookupResponse]:
         return [cast(LookupResponse, item) for item in self._pipeline.lookup_many(points)]
+
+    def memory_report(self) -> dict[str, Any]:
+        return self._pipeline.memory_report()

@@ -144,6 +144,96 @@ FFSFGeometryParse = tuple[
     memoryview,
 ]
 
+_RUNTIME_FEATURE_META_KEYS = {
+    "level",
+    "feature_id",
+    "name",
+    "names",
+    "country_scope_flag",
+}
+
+
+def _trim_feature_meta_enabled() -> bool:
+    raw = os.environ.get("CADIS_TRIM_FEATURE_META", "on")
+    value = raw.strip().lower() if isinstance(raw, str) else "on"
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(
+        f"Unsupported CADIS_TRIM_FEATURE_META={raw!r}; expected on or off"
+    )
+
+
+def _normalize_feature_meta_by_index(raw: object) -> list[dict]:
+    if not isinstance(raw, list):
+        raise ValueError("feature_meta_by_index dataset must be a JSON list")
+    if not _trim_feature_meta_enabled():
+        return raw
+    return [
+        {key: value for key, value in meta.items() if key in _RUNTIME_FEATURE_META_KEYS}
+        if isinstance(meta, dict)
+        else meta
+        for meta in raw
+    ]
+
+
+def _json_size_bytes(value: object) -> int:
+    return len(
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+
+
+def _feature_meta_memory_report(feature_meta_by_index: list[dict]) -> dict[str, Any]:
+    object_count = 0
+    total_key_count = 0
+    feature_ids: set[str] = set()
+    names: set[str] = set()
+    localized_names: set[str] = set()
+    names_payload: list[dict[str, object]] = []
+
+    for meta in feature_meta_by_index:
+        if not isinstance(meta, dict):
+            continue
+        object_count += 1
+        total_key_count += len(meta)
+
+        feature_id = meta.get("feature_id")
+        if isinstance(feature_id, str):
+            feature_ids.add(feature_id)
+
+        name = meta.get("name")
+        row_names_payload: dict[str, object] = {}
+        if isinstance(name, str):
+            names.add(name)
+            row_names_payload["name"] = name
+
+        meta_names = meta.get("names")
+        if isinstance(meta_names, dict):
+            row_names_payload["names"] = meta_names
+            for localized_name in meta_names.values():
+                if isinstance(localized_name, str):
+                    localized_names.add(localized_name)
+        if row_names_payload:
+            names_payload.append(row_names_payload)
+
+    avg_keys = total_key_count / object_count if object_count else 0.0
+    return {
+        "feature_meta_count": len(feature_meta_by_index),
+        "feature_meta_object_count": object_count,
+        "feature_meta_total_key_count": total_key_count,
+        "feature_meta_avg_keys_per_object": avg_keys,
+        "feature_meta_unique_feature_id_count": len(feature_ids),
+        "feature_meta_unique_name_count": len(names),
+        "feature_meta_unique_localized_name_count": len(localized_names),
+        "feature_meta_json_bytes": _json_size_bytes(feature_meta_by_index),
+        "feature_meta_names_json_bytes": _json_size_bytes(names_payload),
+    }
+
 
 def _build_public_feature_hit(*, level: int, meta: dict, source: str) -> dict:
     hit = {
@@ -253,9 +343,9 @@ class FFSFSpatialIndexV2:
 
         geometry_data = memoryview(blob)[offset:]
 
-        feature_meta_by_index = json.loads(feature_meta_path.read_text(encoding="utf-8"))
-        if not isinstance(feature_meta_by_index, list):
-            raise ValueError("feature_meta_by_index dataset must be a JSON list")
+        feature_meta_by_index = _normalize_feature_meta_by_index(
+            json.loads(feature_meta_path.read_text(encoding="utf-8"))
+        )
 
         return cls(
             feature_index=feature_index,
@@ -697,6 +787,21 @@ class FFSFSpatialIndexV3:
     def python_geometry_retained(self) -> bool:
         return self._python_geometry_retained
 
+    def memory_report(self) -> dict[str, Any]:
+        return {
+            "backend_name": self.backend_name,
+            "fallback_geometry_backend_name": self.fallback_geometry_backend_name,
+            "python_geometry_retained": self.python_geometry_retained,
+            "feature_count": len(self.feature_meta_by_index),
+            "part_count": len(self.part_feature_index),
+            "feature_index_count": len(self.feature_index),
+            "part_bbox_count": len(self.part_bboxes),
+            "geom_index_count": len(self.geom_index),
+            "ring_index_count": len(self.ring_index),
+            "geometry_data_bytes": len(self.geometry_data),
+            **_feature_meta_memory_report(self.feature_meta_by_index),
+        }
+
     @classmethod
     def from_files(
         cls,
@@ -707,9 +812,9 @@ class FFSFSpatialIndexV3:
         ffsf_path = Path(ffsf_path)
         feature_meta_path = Path(feature_meta_path)
 
-        feature_meta_by_index = json.loads(feature_meta_path.read_text(encoding="utf-8"))
-        if not isinstance(feature_meta_by_index, list):
-            raise ValueError("feature_meta_by_index dataset must be a JSON list")
+        feature_meta_by_index = _normalize_feature_meta_by_index(
+            json.loads(feature_meta_path.read_text(encoding="utf-8"))
+        )
 
         native_kernel = _create_native_ffsf_kernel(
             ffsf_path=ffsf_path,

@@ -113,6 +113,39 @@ class CadisLookupPipeline:
     def repair_loader_reason_code(self, value: str) -> None:
         self._repair_loader_reason_code = value
 
+    def memory_report(self) -> dict[str, Any]:
+        geometry_report = (
+            self.geometry_index.memory_report()
+            if hasattr(self.geometry_index, "memory_report")
+            else {
+                "backend_name": getattr(self.geometry_index, "backend_name", None),
+                "fallback_geometry_backend_name": getattr(
+                    self.geometry_index,
+                    "fallback_geometry_backend_name",
+                    None,
+                ),
+                "python_geometry_retained": getattr(
+                    self.geometry_index,
+                    "python_geometry_retained",
+                    None,
+                ),
+            }
+        )
+        return {
+            "geometry": geometry_report,
+            "lazy_layers": {
+                "hierarchy_loaded": (
+                    self.policy.hierarchy_required
+                    and self._hierarchy_branch_index_cache is not _UNSET
+                ),
+                "repair_loaded": (
+                    self.policy.repair_required
+                    and self._repair_anchor_map_cache is not _UNSET
+                ),
+                "semantic_overlay_count": len(self.semantic_overlays),
+            },
+        }
+
     def _assert_bootstrapped_base_dataset(self) -> None:
         required = [
             "dataset_release_manifest.json",
