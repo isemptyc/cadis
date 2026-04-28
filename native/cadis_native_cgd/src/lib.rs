@@ -132,16 +132,16 @@ struct Ring {
 
 #[derive(Clone, Copy)]
 struct Point {
-    lon: f64,
-    lat: f64,
+    lon: f32,
+    lat: f32,
 }
 
 #[derive(Clone, Copy)]
 struct BBox {
-    min_lon: f64,
-    min_lat: f64,
-    max_lon: f64,
-    max_lat: f64,
+    min_lon: f32,
+    min_lat: f32,
+    max_lon: f32,
+    max_lat: f32,
 }
 
 struct IndexRec {
@@ -204,10 +204,10 @@ impl CgdKernel {
         for _ in 0..polygon_count {
             require_range(&data, cursor, BBOX_SIZE)?;
             bboxes.push(BBox {
-                min_lon: read_f32(&data, cursor)? as f64,
-                min_lat: read_f32(&data, cursor + 4)? as f64,
-                max_lon: read_f32(&data, cursor + 8)? as f64,
-                max_lat: read_f32(&data, cursor + 12)? as f64,
+                min_lon: read_f32(&data, cursor)?,
+                min_lat: read_f32(&data, cursor + 4)?,
+                max_lon: read_f32(&data, cursor + 8)?,
+                max_lat: read_f32(&data, cursor + 12)?,
             });
             cursor += BBOX_SIZE;
         }
@@ -310,8 +310,8 @@ impl CgdKernel {
                 continue;
             }
 
-            let bbox_area = (polygon.bbox.max_lon - polygon.bbox.min_lon)
-                * (polygon.bbox.max_lat - polygon.bbox.min_lat);
+            let bbox_area = f64::from(polygon.bbox.max_lon - polygon.bbox.min_lon)
+                * f64::from(polygon.bbox.max_lat - polygon.bbox.min_lat);
             if best_named_ocean.is_none()
                 || best_named_ocean_bbox_area.is_none()
                 || bbox_area < best_named_ocean_bbox_area.unwrap()
@@ -352,11 +352,22 @@ impl CgdKernel {
         for i in ring.point_start..end {
             let a = self.points[i];
             let b = self.points[i + 1];
-            if point_on_segment(lon, lat, a.lon, a.lat, b.lon, b.lat) {
+            if point_on_segment(
+                lon,
+                lat,
+                f64::from(a.lon),
+                f64::from(a.lat),
+                f64::from(b.lon),
+                f64::from(b.lat),
+            ) {
                 return true;
             }
-            if (a.lat > lat) != (b.lat > lat) {
-                let x_at_lat = a.lon + (lat - a.lat) * (b.lon - a.lon) / (b.lat - a.lat);
+            let a_lat = f64::from(a.lat);
+            let b_lat = f64::from(b.lat);
+            if (a_lat > lat) != (b_lat > lat) {
+                let a_lon = f64::from(a.lon);
+                let b_lon = f64::from(b.lon);
+                let x_at_lat = a_lon + (lat - a_lat) * (b_lon - a_lon) / (b_lat - a_lat);
                 if x_at_lat == lon {
                     return true;
                 }
@@ -371,7 +382,10 @@ impl CgdKernel {
 
 impl BBox {
     fn contains(&self, lon: f64, lat: f64) -> bool {
-        self.min_lon <= lon && lon <= self.max_lon && self.min_lat <= lat && lat <= self.max_lat
+        f64::from(self.min_lon) <= lon
+            && lon <= f64::from(self.max_lon)
+            && f64::from(self.min_lat) <= lat
+            && lat <= f64::from(self.max_lat)
     }
 }
 
@@ -400,8 +414,8 @@ fn read_geometry(
         cursor += 4;
         let point_start = points.len();
         for _ in 0..point_count {
-            let lon = read_f32(data, cursor)? as f64;
-            let lat = read_f32(data, cursor + 4)? as f64;
+            let lon = read_f32(data, cursor)?;
+            let lat = read_f32(data, cursor + 4)?;
             cursor += 8;
             points.push(Point { lon, lat });
         }
