@@ -160,6 +160,7 @@ def test_native_fallback_geometry_routes_geometry_facts(monkeypatch):
     pt = Point(10.0, 20.0)
 
     assert index.fallback_geometry_backend_name == "native"
+    assert index.python_geometry_retained is False
     assert index.country_scope_contains_point(pt) is True
     assert index.distance_km_to_country_scope(pt) == 12.5
     assert index.distance_km_to_feature_id(pt, "feature-1") == 7.25
@@ -179,6 +180,12 @@ def test_fallback_geometry_defaults_to_auto_with_native_contract(monkeypatch):
     index = _index(_NativeFallbackKernel())
 
     assert index.fallback_geometry_backend_name == "native"
+    assert index.python_geometry_retained is False
+    assert index.feature_index == []
+    assert index.part_bboxes == []
+    assert index.geom_index == []
+    assert index.ring_index == []
+    assert bytes(index.geometry_data) == b""
     assert index.country_scope_contains_point(Point(10.0, 20.0)) is True
 
 
@@ -187,7 +194,18 @@ def test_fallback_geometry_defaults_to_python_without_native_runtime(monkeypatch
     index = _index(None)
 
     assert index.fallback_geometry_backend_name == "python"
+    assert index.python_geometry_retained is True
     assert index.country_scope_contains_point(Point(10.0, 20.0)) is False
+
+
+def test_fallback_geometry_python_mode_retains_python_geometry(monkeypatch):
+    monkeypatch.setenv("CADIS_FFSF_FALLBACK_GEOMETRY", "python")
+    index = _index(_NativeFallbackKernel())
+
+    assert index.fallback_geometry_backend_name == "python"
+    assert index.python_geometry_retained is True
+    assert len(index.feature_index) == 1
+    assert len(index.part_bboxes) == 1
 
 
 def test_native_fallback_geometry_requires_complete_native_contract(monkeypatch):
@@ -213,6 +231,7 @@ def test_fallback_geometry_shadow_logs_classification_mismatch_without_affecting
     monkeypatch.setenv("CADIS_FFSF_FALLBACK_GEOMETRY_SHADOW", "1")
     index = _index(_ShadowNativeKernel(contains=True))
 
+    assert index.python_geometry_retained is True
     with caplog.at_level("INFO", logger="cadis.runtime.dataset.ffsf_runtime"):
         assert index.country_scope_contains_point(Point(10.0, 20.0)) is False
 

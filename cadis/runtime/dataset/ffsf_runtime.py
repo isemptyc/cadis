@@ -556,6 +556,9 @@ class FFSFSpatialIndexV3:
             feature_index=self.feature_index,
             feature_meta_by_index=self.feature_meta_by_index,
         )
+        self._python_geometry_retained = True
+        if self._can_release_python_geometry():
+            self._release_python_geometry()
 
     @property
     def backend_name(self) -> str:
@@ -566,6 +569,10 @@ class FFSFSpatialIndexV3:
         if self._native_fallback_geometry != "python" and self._has_native_fallback_geometry():
             return "native"
         return "python"
+
+    @property
+    def python_geometry_retained(self) -> bool:
+        return self._python_geometry_retained
 
     @classmethod
     def from_files(
@@ -1161,13 +1168,35 @@ class FFSFSpatialIndexV3:
             )
         return has_native
 
+    def _can_release_python_geometry(self) -> bool:
+        if self._fallback_geometry_shadow_enabled:
+            return False
+        return self._native_fallback_geometry != "python" and self._has_native_fallback_geometry()
+
+    def _release_python_geometry(self) -> None:
+        self.feature_index = []
+        self.part_bboxes = []
+        self.geom_index = []
+        self.ring_index = []
+        self.geometry_data = memoryview(b"")
+        self._python_geometry_retained = False
+
+    def _require_python_geometry(self) -> None:
+        if not self._python_geometry_retained:
+            raise RuntimeError(
+                "Python FFSF geometry is not retained because native fallback "
+                "geometry is active"
+            )
+
     def _feature_contains_point(self, feature: FeatureIndexEntry, pt: Point) -> bool:
+        self._require_python_geometry()
         for part_idx in range(feature.part_start_idx, feature.part_start_idx + feature.part_count):
             if self._part_contains_point(part_idx, pt):
                 return True
         return False
 
     def _part_contains_point(self, part_idx: int, pt: Point) -> bool:
+        self._require_python_geometry()
         minx, miny, maxx, maxy = self.part_bboxes[part_idx]
         if not (minx <= pt.x <= maxx and miny <= pt.y <= maxy):
             return False
@@ -1203,6 +1232,7 @@ class FFSFSpatialIndexV3:
         maxx: float,
         maxy: float,
     ) -> float:
+        self._require_python_geometry()
         spanx = maxx - minx
         spany = maxy - miny
         geom = self.geom_index[part_idx]
@@ -1273,6 +1303,7 @@ class FFSFSpatialIndexV3:
         self,
         geom: GeomIndexV2Entry,
     ) -> tuple[list[tuple[int, int]], list[list[tuple[int, int]]]]:
+        self._require_python_geometry()
         data = self.geometry_data[geom.byte_offset: geom.byte_offset + geom.byte_len]
         if len(data) % 2 != 0:
             raise ValueError("GeometryData byte length must be even")
