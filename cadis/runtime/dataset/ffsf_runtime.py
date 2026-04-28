@@ -152,6 +152,130 @@ _RUNTIME_FEATURE_META_KEYS = {
     "country_scope_flag",
 }
 
+_FEATURE_META_COLUMNS = {
+    "level": "levels",
+    "feature_id": "feature_ids",
+    "name": "names",
+    "names": "names_i18n",
+    "country_scope_flag": "country_scope_flags",
+}
+
+
+class FeatureMetaView:
+    __slots__ = ("_columns", "_index")
+
+    def __init__(self, columns: "FeatureMetaColumns", index: int):
+        self._columns = columns
+        self._index = index
+
+    def get(self, key: str, default: object = None) -> object:
+        column_name = _FEATURE_META_COLUMNS.get(key)
+        if column_name is None:
+            return default
+        values = getattr(self._columns, column_name)
+        value = values[self._index]
+        return default if value is None else value
+
+
+class FeatureMetaColumns:
+    __slots__ = (
+        "levels",
+        "feature_ids",
+        "names",
+        "names_i18n",
+        "country_scope_flags",
+        "id_to_index",
+    )
+
+    def __init__(
+        self,
+        *,
+        levels: list[int | None],
+        feature_ids: list[str | int | None],
+        names: list[str | None],
+        names_i18n: list[dict | None],
+        country_scope_flags: list[bool],
+        id_to_index: dict[str, int],
+    ):
+        self.levels = levels
+        self.feature_ids = feature_ids
+        self.names = names
+        self.names_i18n = names_i18n
+        self.country_scope_flags = country_scope_flags
+        self.id_to_index = id_to_index
+
+    @classmethod
+    def from_rows(cls, rows: list[dict]) -> "FeatureMetaColumns":
+        levels: list[int | None] = []
+        feature_ids: list[str | int | None] = []
+        names: list[str | None] = []
+        names_i18n: list[dict | None] = []
+        country_scope_flags: list[bool] = []
+        id_to_index: dict[str, int] = {}
+
+        for feature_idx, meta in enumerate(rows):
+            level = meta.get("level") if isinstance(meta, dict) else None
+            feature_id = meta.get("feature_id") if isinstance(meta, dict) else None
+            name = meta.get("name") if isinstance(meta, dict) else None
+            row_names = meta.get("names") if isinstance(meta, dict) else None
+            country_scope_flag = (
+                meta.get("country_scope_flag") is True
+                if isinstance(meta, dict)
+                else False
+            )
+
+            levels.append(level if isinstance(level, int) else None)
+            feature_ids.append(
+                feature_id if isinstance(feature_id, (str, int)) else None
+            )
+            names.append(name if isinstance(name, str) else None)
+            names_i18n.append(row_names if isinstance(row_names, dict) else None)
+            country_scope_flags.append(country_scope_flag)
+            if isinstance(feature_id, str) and feature_id:
+                id_to_index[feature_id] = feature_idx
+
+        return cls(
+            levels=levels,
+            feature_ids=feature_ids,
+            names=names,
+            names_i18n=names_i18n,
+            country_scope_flags=country_scope_flags,
+            id_to_index=id_to_index,
+        )
+
+    def __len__(self) -> int:
+        return len(self.levels)
+
+    def __getitem__(self, index: int) -> FeatureMetaView:
+        return FeatureMetaView(self, index)
+
+    def __iter__(self):
+        for index in range(len(self)):
+            yield FeatureMetaView(self, index)
+
+    def row_json(self, index: int) -> dict[str, object]:
+        row: dict[str, object] = {}
+        level = self.levels[index]
+        feature_id = self.feature_ids[index]
+        name = self.names[index]
+        names = self.names_i18n[index]
+        if level is not None:
+            row["level"] = level
+        if feature_id is not None:
+            row["feature_id"] = feature_id
+        if name is not None:
+            row["name"] = name
+        if names:
+            row["names"] = names
+        row["country_scope_flag"] = self.country_scope_flags[index]
+        return row
+
+    def rows_json(self) -> list[dict[str, object]]:
+        return [self.row_json(index) for index in range(len(self))]
+
+
+FeatureMetaStorage = list[dict] | FeatureMetaColumns
+
 
 def _trim_feature_meta_enabled() -> bool:
     raw = os.environ.get("CADIS_TRIM_FEATURE_META", "on")
@@ -163,6 +287,16 @@ def _trim_feature_meta_enabled() -> bool:
     raise ValueError(
         f"Unsupported CADIS_TRIM_FEATURE_META={raw!r}; expected on or off"
     )
+
+
+def _feature_meta_mode() -> str:
+    raw = os.environ.get("CADIS_FEATURE_META_MODE", "dict")
+    value = raw.strip().lower() if isinstance(raw, str) else "dict"
+    if value not in {"dict", "columnar"}:
+        raise ValueError(
+            f"Unsupported CADIS_FEATURE_META_MODE={raw!r}; expected dict or columnar"
+        )
+    return value
 
 
 def _normalize_feature_meta_by_index(raw: object) -> list[dict]:
@@ -178,6 +312,12 @@ def _normalize_feature_meta_by_index(raw: object) -> list[dict]:
     ]
 
 
+def _prepare_feature_meta_storage(rows: list[dict]) -> FeatureMetaStorage:
+    if _feature_meta_mode() == "columnar":
+        return FeatureMetaColumns.from_rows(rows)
+    return rows
+
+
 def _json_size_bytes(value: object) -> int:
     return len(
         json.dumps(
@@ -188,7 +328,10 @@ def _json_size_bytes(value: object) -> int:
     )
 
 
-def _feature_meta_memory_report(feature_meta_by_index: list[dict]) -> dict[str, Any]:
+def _feature_meta_memory_report(feature_meta_by_index: FeatureMetaStorage) -> dict[str, Any]:
+    if isinstance(feature_meta_by_index, FeatureMetaColumns):
+        return _feature_meta_columns_memory_report(feature_meta_by_index)
+
     object_count = 0
     total_key_count = 0
     feature_ids: set[str] = set()
@@ -223,6 +366,7 @@ def _feature_meta_memory_report(feature_meta_by_index: list[dict]) -> dict[str, 
 
     avg_keys = total_key_count / object_count if object_count else 0.0
     return {
+        "feature_meta_mode": "dict",
         "feature_meta_count": len(feature_meta_by_index),
         "feature_meta_object_count": object_count,
         "feature_meta_total_key_count": total_key_count,
@@ -235,7 +379,44 @@ def _feature_meta_memory_report(feature_meta_by_index: list[dict]) -> dict[str, 
     }
 
 
-def _build_public_feature_hit(*, level: int, meta: dict, source: str) -> dict:
+def _feature_meta_columns_memory_report(columns: FeatureMetaColumns) -> dict[str, Any]:
+    feature_ids = {
+        feature_id
+        for feature_id in columns.feature_ids
+        if isinstance(feature_id, str)
+    }
+    names = {name for name in columns.names if isinstance(name, str)}
+    localized_names: set[str] = set()
+    names_payload: list[dict[str, object]] = []
+    for index, row_names in enumerate(columns.names_i18n):
+        row_names_payload: dict[str, object] = {}
+        name = columns.names[index]
+        if isinstance(name, str):
+            row_names_payload["name"] = name
+        if isinstance(row_names, dict):
+            row_names_payload["names"] = row_names
+            for localized_name in row_names.values():
+                if isinstance(localized_name, str):
+                    localized_names.add(localized_name)
+        if row_names_payload:
+            names_payload.append(row_names_payload)
+
+    total_key_count = sum(len(columns.row_json(index)) for index in range(len(columns)))
+    return {
+        "feature_meta_mode": "columnar",
+        "feature_meta_count": len(columns),
+        "feature_meta_object_count": 0,
+        "feature_meta_total_key_count": total_key_count,
+        "feature_meta_avg_keys_per_object": 0.0,
+        "feature_meta_unique_feature_id_count": len(feature_ids),
+        "feature_meta_unique_name_count": len(names),
+        "feature_meta_unique_localized_name_count": len(localized_names),
+        "feature_meta_json_bytes": _json_size_bytes(columns.rows_json()),
+        "feature_meta_names_json_bytes": _json_size_bytes(names_payload),
+    }
+
+
+def _build_public_feature_hit(*, level: int, meta: Any, source: str) -> dict:
     hit = {
         "level": level,
         "name": meta.get("name"),
@@ -412,7 +593,7 @@ class FFSFSpatialIndexV2:
 def _select_country_scope_feature_indices(
     *,
     feature_index: list[FeatureIndexEntry],
-    feature_meta_by_index: list[dict],
+    feature_meta_by_index: FeatureMetaStorage,
 ) -> tuple[list[int], list[int]]:
     """
     Choose the geometry features used for country-scope execution.
@@ -708,7 +889,7 @@ class FFSFSpatialIndexV3:
         geom_index: list[GeomIndexV2Entry],
         ring_index: list[int],
         geometry_data: memoryview,
-        feature_meta_by_index: list[dict],
+        feature_meta_by_index: list[dict] | FeatureMetaColumns,
         native_kernel: Any | None = None,
     ):
         self.feature_index = feature_index
@@ -716,7 +897,11 @@ class FFSFSpatialIndexV3:
         self.geom_index = geom_index
         self.ring_index = ring_index
         self.geometry_data = geometry_data
-        self.feature_meta_by_index = feature_meta_by_index
+        self.feature_meta_by_index = (
+            _prepare_feature_meta_storage(feature_meta_by_index)
+            if isinstance(feature_meta_by_index, list)
+            else feature_meta_by_index
+        )
         self.native_kernel = native_kernel
         requested_fallback_geometry = _requested_ffsf_fallback_geometry()
         if requested_fallback_geometry == "native" and native_kernel is None:
@@ -756,11 +941,14 @@ class FFSFSpatialIndexV3:
             for part_idx in range(feature.part_start_idx, feature.part_start_idx + feature.part_count):
                 self.part_feature_index[part_idx] = feature_idx
 
-        self.feature_id_to_index: dict[str, int] = {}
-        for feature_idx, meta in enumerate(self.feature_meta_by_index):
-            feature_id = meta.get("feature_id")
-            if isinstance(feature_id, str) and feature_id:
-                self.feature_id_to_index[feature_id] = feature_idx
+        if isinstance(self.feature_meta_by_index, FeatureMetaColumns):
+            self.feature_id_to_index = self.feature_meta_by_index.id_to_index
+        else:
+            self.feature_id_to_index: dict[str, int] = {}
+            for feature_idx, meta in enumerate(self.feature_meta_by_index):
+                feature_id = meta.get("feature_id")
+                if isinstance(feature_id, str) and feature_id:
+                    self.feature_id_to_index[feature_id] = feature_idx
 
         (
             self.country_scope_feature_indices,
@@ -911,7 +1099,7 @@ class FFSFSpatialIndexV3:
             if raw_feature_idx < 0 or raw_feature_idx >= len(self.feature_meta_by_index):
                 continue
             meta = self.feature_meta_by_index[raw_feature_idx]
-            if not isinstance(meta, dict):
+            if not hasattr(meta, "get"):
                 continue
             hits[raw_level] = _build_public_feature_hit(
                 level=raw_level,

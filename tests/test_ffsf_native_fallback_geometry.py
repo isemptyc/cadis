@@ -21,6 +21,9 @@ class _NativeFallbackKernel:
     def country_scope_contains_point(self, lon, lat, part_indices):
         return (lon, lat, part_indices) == (10.0, 20.0, [0])
 
+    def query_point_feature_indices(self, lon, lat, levels):
+        return {4: 0} if (lon, lat, levels) == (10.0, 20.0, [4]) else {}
+
     def distance_km_to_country_scope(self, lon, lat, part_indices):
         return 12.5
 
@@ -321,6 +324,52 @@ def test_feature_meta_trim_can_be_disabled(monkeypatch, tmp_path):
 
     assert index.feature_meta_by_index[0]["unused_rank"] == 123
     assert index.memory_report()["feature_meta_total_key_count"] == 5
+
+
+def test_columnar_feature_meta_mode_preserves_lookup_semantics(monkeypatch):
+    monkeypatch.setenv("CADIS_FEATURE_META_MODE", "columnar")
+    monkeypatch.setenv("CADIS_FFSF_FALLBACK_GEOMETRY", "python")
+    dict_index = _square_index(None)
+    monkeypatch.setenv("CADIS_FEATURE_META_MODE", "dict")
+    expected_index = _square_index(None)
+
+    pt = Point(0.5, 0.5)
+
+    assert dict_index.query_point(pt, [4]) == expected_index.query_point(pt, [4])
+    assert dict_index.query_point_nearest(
+        Point(3.0, 0.5),
+        max_distance_km=500.0,
+        levels=[4],
+    ) == expected_index.query_point_nearest(
+        Point(3.0, 0.5),
+        max_distance_km=500.0,
+        levels=[4],
+    )
+    assert dict_index.distance_km_to_feature_id(pt, "feature-0") == (
+        expected_index.distance_km_to_feature_id(pt, "feature-0")
+    )
+    assert dict_index.build_country_scope_allowlist(levels=[4]) == (
+        expected_index.build_country_scope_allowlist(levels=[4])
+    )
+    assert isinstance(dict_index.feature_meta_by_index, ffsf_mod.FeatureMetaColumns)
+    assert dict_index.memory_report()["feature_meta_mode"] == "columnar"
+    assert dict_index.memory_report()["feature_meta_object_count"] == 0
+
+
+def test_columnar_feature_meta_mode_preserves_native_hit_mapping(monkeypatch):
+    monkeypatch.setenv("CADIS_FEATURE_META_MODE", "columnar")
+    monkeypatch.delenv("CADIS_FFSF_FALLBACK_GEOMETRY", raising=False)
+    index = _index(_NativeFallbackKernel())
+
+    assert index.query_point(Point(10.0, 20.0), [4]) == {
+        4: {
+            "level": 4,
+            "name": "Feature 1",
+            "osm_id": "feature-1",
+            "source": "polygon",
+        }
+    }
+    assert isinstance(index.feature_meta_by_index, ffsf_mod.FeatureMetaColumns)
 
 
 def test_memory_report_exposes_released_geometry_counts(monkeypatch):
