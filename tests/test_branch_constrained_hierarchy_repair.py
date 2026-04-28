@@ -10,6 +10,7 @@ from cadis.runtime.dataset.loader import (
     HierarchyBranchNode,
     load_hierarchy_branch_index,
 )
+from cadis.runtime.execution import pipeline as pipeline_mod
 from cadis.runtime.execution.pipeline import CadisLookupPipeline
 
 
@@ -21,6 +22,23 @@ def _pipeline(index: HierarchyBranchIndex) -> CadisLookupPipeline:
         hierarchy_child_levels={7, 8},
     )
     pipeline.hierarchy_branch_index = index
+    return pipeline
+
+
+def _lazy_pipeline(tmp_path: Path, *, hierarchy_required: bool, repair_required: bool) -> CadisLookupPipeline:
+    pipeline = CadisLookupPipeline.__new__(CadisLookupPipeline)
+    pipeline.dataset_dir = tmp_path
+    pipeline.policy = SimpleNamespace(
+        hierarchy_required=hierarchy_required,
+        hierarchy_parent_level=6,
+        hierarchy_child_levels={7, 8},
+        repair_required=repair_required,
+        repair_parent_level=6,
+        repair_child_levels={7, 8},
+    )
+    pipeline._hierarchy_branch_index_cache = pipeline_mod._UNSET if hierarchy_required else None
+    pipeline._repair_anchor_map_cache = pipeline_mod._UNSET if repair_required else {}
+    pipeline._repair_loader_reason_code = "not_loaded" if repair_required else "disabled_by_policy"
     return pipeline
 
 
@@ -117,6 +135,62 @@ def test_repair_uses_parent_from_polygon_branch_path():
             "source": "admin_tree_id",
         }
     }
+
+
+def test_hierarchy_index_loads_lazily_until_parent_level_is_missing(tmp_path, monkeypatch):
+    calls = 0
+    index = _index(
+        [
+            HierarchyBranchNode("r6", 6, "Faro", None, None),
+            HierarchyBranchNode("r7", 7, "Lagoa", "r6", None),
+        ]
+    )
+
+    def load_index(dataset_dir):
+        nonlocal calls
+        calls += 1
+        return index
+
+    monkeypatch.setattr(pipeline_mod, "load_hierarchy_branch_index", load_index)
+    pipeline = _lazy_pipeline(tmp_path, hierarchy_required=True, repair_required=False)
+
+    assert pipeline._hierarchy_provider({7: {"osm_id": "pt_r7", "name": "Lagoa"}}, {8}) == {}
+    assert calls == 0
+
+    assert pipeline._hierarchy_provider({7: {"osm_id": "pt_r7", "name": "Lagoa"}}, {6}) == {
+        6: {
+            "level": 6,
+            "name": "Faro",
+            "osm_id": "r6",
+            "source": "admin_tree_id",
+        }
+    }
+    assert calls == 1
+
+
+def test_repair_map_loads_lazily_until_parent_level_is_missing(tmp_path, monkeypatch):
+    calls = 0
+
+    def load_repair(dataset_dir):
+        nonlocal calls
+        calls += 1
+        return {"Child": ("Parent", "parent_id")}, "loaded"
+
+    monkeypatch.setattr(pipeline_mod, "load_repair_anchor_map", load_repair)
+    pipeline = _lazy_pipeline(tmp_path, hierarchy_required=False, repair_required=True)
+
+    assert pipeline._repair_provider({7: {"name": "Child"}}, {8}) == {}
+    assert calls == 0
+
+    assert pipeline._repair_provider({7: {"name": "Child"}}, {6}) == {
+        6: {
+            "level": 6,
+            "name": "Parent",
+            "osm_id": "parent_id",
+            "source": "semantic_anchor",
+        }
+    }
+    assert calls == 1
 
 
 def test_loader_enables_explicit_branch_identity_only_when_valid(tmp_path):

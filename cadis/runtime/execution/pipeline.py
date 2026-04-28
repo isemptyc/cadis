@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Iterable
+from typing import Any, Iterable, cast
 
 from cadis.runtime.core_adapter import AdminEngineCore
 from cadis.runtime.dataset.loader import (
@@ -19,6 +19,9 @@ from cadis.runtime.dataset.loader import (
 )
 from cadis.runtime.errors import DatasetNotBootstrappedError
 from cadis.version import __version__
+
+
+_UNSET = object()
 
 
 def evaluate_lookup_status(
@@ -66,13 +69,49 @@ class CadisLookupPipeline:
         self.core = AdminEngineCore(enable_v2_shadow=False)
         self.geometry_index = load_geometry_index(self.dataset_dir)
         if self.policy.hierarchy_required:
-            self.hierarchy_branch_index: HierarchyBranchIndex | None = load_hierarchy_branch_index(self.dataset_dir)
+            self._hierarchy_branch_index_cache: HierarchyBranchIndex | None | object = _UNSET
         else:
-            self.hierarchy_branch_index = None
+            self._hierarchy_branch_index_cache = None
         if self.policy.repair_required:
-            self.repair_anchor_map, self.repair_loader_reason_code = load_repair_anchor_map(self.dataset_dir)
+            self._repair_anchor_map_cache: dict[str, tuple[str, str]] | object = _UNSET
+            self._repair_loader_reason_code = "not_loaded"
         else:
-            self.repair_anchor_map, self.repair_loader_reason_code = {}, "disabled_by_policy"
+            self._repair_anchor_map_cache = {}
+            self._repair_loader_reason_code = "disabled_by_policy"
+
+    @property
+    def hierarchy_branch_index(self) -> HierarchyBranchIndex | None:
+        if self._hierarchy_branch_index_cache is _UNSET:
+            self._hierarchy_branch_index_cache = load_hierarchy_branch_index(self.dataset_dir)
+        return cast(HierarchyBranchIndex | None, self._hierarchy_branch_index_cache)
+
+    @hierarchy_branch_index.setter
+    def hierarchy_branch_index(self, value: HierarchyBranchIndex | None) -> None:
+        self._hierarchy_branch_index_cache = value
+
+    @property
+    def repair_anchor_map(self) -> dict[str, tuple[str, str]]:
+        if self._repair_anchor_map_cache is _UNSET:
+            self._repair_anchor_map_cache, self._repair_loader_reason_code = load_repair_anchor_map(
+                self.dataset_dir
+            )
+        return cast(dict[str, tuple[str, str]], self._repair_anchor_map_cache)
+
+    @repair_anchor_map.setter
+    def repair_anchor_map(self, value: dict[str, tuple[str, str]]) -> None:
+        self._repair_anchor_map_cache = value
+
+    @property
+    def repair_loader_reason_code(self) -> str:
+        if self._repair_anchor_map_cache is _UNSET:
+            self._repair_anchor_map_cache, self._repair_loader_reason_code = load_repair_anchor_map(
+                self.dataset_dir
+            )
+        return self._repair_loader_reason_code
+
+    @repair_loader_reason_code.setter
+    def repair_loader_reason_code(self, value: str) -> None:
+        self._repair_loader_reason_code = value
 
     def _assert_bootstrapped_base_dataset(self) -> None:
         required = [
@@ -100,11 +139,11 @@ class CadisLookupPipeline:
     def _hierarchy_provider(self, evidence: dict[int, dict], missing_levels: set[int]) -> dict[int, dict]:
         if not self.policy.hierarchy_required:
             return {}
-        branch_index = self.hierarchy_branch_index
-        if branch_index is None:
-            return {}
         parent_level = self.policy.hierarchy_parent_level
         if parent_level not in missing_levels:
+            return {}
+        branch_index = self.hierarchy_branch_index
+        if branch_index is None:
             return {}
 
         evidence_paths: list[tuple[int, list[Any]]] = []
