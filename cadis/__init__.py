@@ -1,6 +1,15 @@
 """Public control-layer API for Cadis."""
 
-from ._api import bootstrap, classify_world, info, lookup, lookup_many, reinstall
+from ._api import (
+    bootstrap,
+    classify_world,
+    clear_runtimes,
+    info,
+    lookup,
+    lookup_many,
+    memory_report,
+    reinstall,
+)
 from ._remote_sdk import CadisRemoteSDK
 from ._sdk import CadisSDK
 from .types import (
@@ -22,6 +31,8 @@ __all__ = [
     "info",
     "bootstrap",
     "reinstall",
+    "memory_report",
+    "clear_runtimes",
     "CadisSDK",
     "CadisRemoteSDK",
     "ExecutionOutcome",

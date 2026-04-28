@@ -37,6 +37,7 @@ DATASET_ISO2_ALIASES = {
 }
 OFFSHORE_CANDIDATE_MARGIN_KM = 5.0
 OFFSHORE_MAX_CANDIDATES = 5
+BATCH_AUTO_RELEASE_THRESHOLD = 3
 
 
 @dataclass(frozen=True)
@@ -212,6 +213,24 @@ def _env_int(name: str, default: int) -> int:
     if value < 1:
         return default
     return value
+
+
+def _use_batch_runtime_release(
+    *,
+    runtime_cache_policy: str | None,
+    country_count: int,
+) -> bool:
+    if runtime_cache_policy is None:
+        threshold = _env_int("CADIS_BATCH_AUTO_RELEASE_THRESHOLD", BATCH_AUTO_RELEASE_THRESHOLD)
+        return country_count > threshold
+    policy = runtime_cache_policy.strip().lower()
+    if policy in {"batch", "release", "process_and_release"}:
+        return True
+    if policy in {"cache", "reuse", "keep"}:
+        return False
+    raise ValueError(
+        "runtime_cache_policy must be one of: batch, release, process_and_release, cache, reuse, keep"
+    )
 
 
 def _failed_output(
@@ -605,7 +624,10 @@ def _retry_open_sea_with_candidate_runtime(
         lon=lon,
         cache_dir=cache_dir,
     ):
-        runtime_handle, dataset_state = manager.get_runtime_readiness(iso2, cache_dir=cache_dir)
+        try:
+            runtime_handle, dataset_state = manager.get_runtime_readiness(iso2, cache_dir=cache_dir)
+        except Exception:
+            continue
         if runtime_handle is None:
             continue
         if not isinstance(dataset_state, dict) or dataset_state.get("status") != "ready":
@@ -620,7 +642,7 @@ def _retry_open_sea_with_candidate_runtime(
         if offshore_km is None or distance_km > float(offshore_km):
             continue
 
-        if nearest is None or distance_km < nearest[0]:
+        if nearest is None or (distance_km, iso2) < (nearest[0], nearest[1]):
             nearest = (distance_km, iso2, runtime_handle)
 
     if nearest is None:
@@ -818,26 +840,17 @@ def _lookup_country_rows(
             )
         return output
 
-    for row in rows:
-        try:
-            admin_result = runtime_handle.runtime.lookup(row.lat, row.lon)
-        except Exception:
-            output[row.index] = _failed_output(
-                state={"world": row.world_state, "dataset": runtime_handle.dataset_state},
-            )
-            continue
-
+    def build_output(row: _ResolvedLookupRecord, admin_result: object) -> LookupResponse:
         if not isinstance(admin_result, dict):
-            output[row.index] = _failed_output(
+            return _failed_output(
                 state={"world": row.world_state, "dataset": runtime_handle.dataset_state},
             )
-            continue
 
         runtime_status = str(admin_result.get("lookup_status", "failed"))
         if runtime_status not in {"ok", "partial", "failed"}:
             runtime_status = "failed"
 
-        output[row.index] = {
+        return {
             "engine": "cadis",
             "version": VERSION,
             "execution": _execution_outcome(
@@ -853,6 +866,29 @@ def _lookup_country_rows(
             },
             "result": admin_result.get("result"),
         }
+
+    lookup_many_fn = getattr(runtime_handle.runtime, "lookup_many", None)
+    if callable(lookup_many_fn):
+        points = [{"lat": row.lat, "lon": row.lon} for row in rows]
+        try:
+            admin_results = lookup_many_fn(points)
+        except Exception:
+            admin_results = None
+        if isinstance(admin_results, list) and len(admin_results) == len(rows):
+            for row, admin_result in zip(rows, admin_results):
+                output[row.index] = build_output(row, admin_result)
+            return output
+
+    for row in rows:
+        try:
+            admin_result = runtime_handle.runtime.lookup(row.lat, row.lon)
+        except Exception:
+            output[row.index] = _failed_output(
+                state={"world": row.world_state, "dataset": runtime_handle.dataset_state},
+            )
+            continue
+
+        output[row.index] = build_output(row, admin_result)
     return output
 
 
@@ -904,6 +940,7 @@ def _resolve_open_sea_lookup_rows(
     rows: list[_OpenSeaLookupRecord],
     cache_dir: str | Path | None = None,
     diagnostics: _LookupManyDiagnostics | None = None,
+    runtime_cache_policy: str | None = None,
 ) -> list[_ResolvedLookupRecord]:
     candidate_datasets = _offshore_candidate_datasets(manager=manager, cache_dir=cache_dir)
     if diagnostics is not None:
@@ -923,34 +960,46 @@ def _resolve_open_sea_lookup_rows(
             diagnostics.inc("offshore_candidate_rows")
             diagnostics.inc("offshore_candidate_checks", len(candidates))
 
+    release_runtimes = _use_batch_runtime_release(
+        runtime_cache_policy=runtime_cache_policy,
+        country_count=len(candidate_union),
+    )
+
     nearest_by_index: dict[int, tuple[float, str]] = {}
     for iso2 in sorted(candidate_union):
         if diagnostics is not None:
             diagnostics.inc("offshore_runtime_groups_considered")
         try:
-            runtime_handle, dataset_state = manager.get_runtime_readiness(iso2, cache_dir=cache_dir)
-        except Exception:
-            continue
-        if runtime_handle is None:
-            continue
-        if not isinstance(dataset_state, dict) or dataset_state.get("status") != "ready":
-            continue
+            runtime_handle = None
+            dataset_state = None
+            try:
+                runtime_handle, dataset_state = manager.get_runtime_readiness(iso2, cache_dir=cache_dir)
+            except Exception:
+                runtime_handle = None
+            if runtime_handle is not None and isinstance(dataset_state, dict) and dataset_state.get("status") == "ready":
+                pipeline = getattr(getattr(runtime_handle, "runtime", None), "_pipeline", None)
+                policy = getattr(pipeline, "policy", None)
+                offshore_km = getattr(policy, "offshore_max_distance_km", None)
+                if offshore_km is None:
+                    continue
 
-        pipeline = getattr(getattr(runtime_handle, "runtime", None), "_pipeline", None)
-        policy = getattr(pipeline, "policy", None)
-        offshore_km = getattr(policy, "offshore_max_distance_km", None)
-        if offshore_km is None:
-            continue
-
-        for row in rows:
-            if iso2 not in candidate_iso2_by_index.get(row.index, ()):
-                continue
-            distance_km = _runtime_offshore_distance_km(runtime_handle, lat=row.lat, lon=row.lon)
-            if distance_km is None or distance_km > float(offshore_km):
-                continue
-            current = nearest_by_index.get(row.index)
-            if current is None or (distance_km, iso2) < current:
-                nearest_by_index[row.index] = (distance_km, iso2)
+                for row in rows:
+                    if iso2 not in candidate_iso2_by_index.get(row.index, ()):
+                        continue
+                    distance_km = _runtime_offshore_distance_km(runtime_handle, lat=row.lat, lon=row.lon)
+                    if distance_km is None or distance_km > float(offshore_km):
+                        continue
+                    current = nearest_by_index.get(row.index)
+                    if current is None or (distance_km, iso2) < current:
+                        nearest_by_index[row.index] = (distance_km, iso2)
+        finally:
+            if release_runtimes and hasattr(manager, "hint_release"):
+                try:
+                    if manager.hint_release(iso2) and diagnostics is not None:
+                        diagnostics.inc("batch_runtime_releases")
+                        diagnostics.inc("offshore_runtime_releases")
+                except Exception:
+                    pass
 
     resolved: list[_ResolvedLookupRecord] = []
     for row in rows:
@@ -980,12 +1029,14 @@ def lookup_many(
     *,
     cache_dir: str | Path | None = None,
     allowed_iso2: Iterable[str] | None = None,
+    runtime_cache_policy: str | None = None,
 ) -> list[LookupManyResponseItem]:
     return _lookup_many_impl(
         points,
         cache_dir=cache_dir,
         allowed_iso2=allowed_iso2,
         diagnostics=None,
+        runtime_cache_policy=runtime_cache_policy,
     )
 
 
@@ -994,6 +1045,7 @@ def _lookup_many_with_diagnostics(
     *,
     cache_dir: str | Path | None = None,
     allowed_iso2: Iterable[str] | None = None,
+    runtime_cache_policy: str | None = None,
 ) -> dict[str, object]:
     diagnostics = _LookupManyDiagnostics()
     results = _lookup_many_impl(
@@ -1001,6 +1053,7 @@ def _lookup_many_with_diagnostics(
         cache_dir=cache_dir,
         allowed_iso2=allowed_iso2,
         diagnostics=diagnostics,
+        runtime_cache_policy=runtime_cache_policy,
     )
     return {"results": results, "diagnostics": diagnostics.as_dict()}
 
@@ -1011,8 +1064,11 @@ def _lookup_many_impl(
     cache_dir: str | Path | None,
     allowed_iso2: Iterable[str] | None,
     diagnostics: _LookupManyDiagnostics | None,
+    runtime_cache_policy: str | None = None,
 ) -> list[LookupManyResponseItem]:
     total_start = time.perf_counter()
+    if runtime_cache_policy is not None:
+        _use_batch_runtime_release(runtime_cache_policy=runtime_cache_policy, country_count=0)
     rows = list(points)
     results: list[LookupManyResponseItem | None] = [None] * len(rows)
     valid_rows: list[_LookupManyRecord] = []
@@ -1189,6 +1245,7 @@ def _lookup_many_impl(
             rows=open_sea_rows,
             cache_dir=cache_dir,
             diagnostics=diagnostics,
+            runtime_cache_policy=runtime_cache_policy,
         )
         resolved_rows.extend(offshore_resolved)
         offshore_resolved_indexes = {row.index for row in offshore_resolved}
@@ -1210,6 +1267,14 @@ def _lookup_many_impl(
         diagnostics.rows_by_iso2 = {iso2: len(items) for iso2, items in by_iso2.items()}
         diagnostics.add_time("country_grouping", time.perf_counter() - grouping_start)
 
+    use_batch_release = _use_batch_runtime_release(
+        runtime_cache_policy=runtime_cache_policy,
+        country_count=len(by_iso2),
+    )
+    if diagnostics is not None:
+        diagnostics.counters["batch_runtime_release_enabled"] = int(use_batch_release)
+        diagnostics.counters["batch_runtime_group_count"] = len(by_iso2)
+
     country_start = time.perf_counter()
     for iso2 in sorted(by_iso2):
         grouped_rows = sorted(by_iso2[iso2], key=lambda item: (item.lat, item.lon, item.id, item.index))
@@ -1221,6 +1286,13 @@ def _lookup_many_impl(
             diagnostics=diagnostics,
         ).items():
             results[index] = _lookup_many_output(_lookup_many_point_id(rows[index], index), payload)
+        if use_batch_release and hasattr(manager, "hint_release"):
+            try:
+                if manager.hint_release(iso2) and diagnostics is not None:
+                    diagnostics.inc("batch_runtime_releases")
+                    diagnostics.inc("country_runtime_releases")
+            except Exception:
+                pass
     if diagnostics is not None:
         diagnostics.add_time("country_runtime_pass", time.perf_counter() - country_start)
 
@@ -1320,3 +1392,25 @@ def info(
         "dataset_lockdown_enabled": dataset_policy.enabled,
         "allowed_iso2": sorted(dataset_policy.allowed_iso2),
     }
+
+
+def memory_report(
+    *,
+    cache_dir: str | Path | None = None,
+    allowed_iso2: Iterable[str] | None = None,
+) -> dict[str, Any]:
+    manager = get_manager(cache_dir=cache_dir, allowed_iso2=allowed_iso2)
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "version": VERSION,
+        **manager.memory_report(),
+    }
+
+
+def clear_runtimes(
+    *,
+    cache_dir: str | Path | None = None,
+    allowed_iso2: Iterable[str] | None = None,
+) -> int:
+    manager = get_manager(cache_dir=cache_dir, allowed_iso2=allowed_iso2)
+    return manager.clear_runtimes()

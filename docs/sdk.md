@@ -208,6 +208,12 @@ Each `lookup` value is the same payload schema returned by `lookup()`. Invalid p
 
 `lookup_many()` performs deterministic batch planning internally. Cadis validates inputs, runs a world pass, resolves open-sea/offshore candidates, groups resolvable rows by ISO2, processes country groups in stable order, and writes results back to the original input order.
 
+Cadis guarantees cache-state invariance for a stable runtime environment. Stable means dataset files and versions do not change during the process lifetime, backend selection and related environment configuration remain fixed, and runtime initialization behavior is consistent without transient failures. Under those conditions, lookup results depend only on input data and installed datasets, not on whether country runtimes are cold, warm, retained, or released.
+
+`lookup_many()` cache behavior is a performance policy, not a semantic policy. `runtime_cache_policy="batch"` may release country runtimes after each group, while `runtime_cache_policy="cache"` may retain them for reuse; both modes must produce identical lookup payloads for the same inputs in a stable environment. `CADIS_RUNTIME_CACHE_SIZE=0` disables residual country runtime retention and is useful as a canonical cold-cache reference path for debugging.
+
+If dataset files change, backend configuration changes, or runtime initialization becomes unstable during a process, cold and warm behavior can diverge. Cadis treats that as an operational consistency issue rather than supported semantic behavior.
+
 ### Top-Level Fields
 
 - `engine`: always `"cadis"`.

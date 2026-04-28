@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import threading
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable
@@ -29,7 +31,8 @@ class CadisManager:
         default_cache_dir: str | Path | None = None,
     ) -> None:
         self._global_lookup = None
-        self._runtime_handles: dict[str, _RuntimeHandle] = {}
+        self._runtime_handles: OrderedDict[str, _RuntimeHandle] = OrderedDict()
+        self._runtime_cache_capacity = _env_int_allow_zero("CADIS_RUNTIME_CACHE_SIZE", 6)
         self._lock = threading.Lock()
         self._dataset_policy = dataset_policy or load_dataset_policy_from_env()
         self._default_cache_dir = (
@@ -235,13 +238,11 @@ class CadisManager:
         normalized_iso2 = iso2.strip().upper()
         if not self.is_iso2_allowed(normalized_iso2):
             return None, self._blocked_dataset_state(normalized_iso2)
-        handle = self._runtime_handles.get(normalized_iso2)
-        if handle is not None:
-            return handle, dict(handle.dataset_state)
 
         with self._lock:
             handle = self._runtime_handles.get(normalized_iso2)
             if handle is not None:
+                self._runtime_handles.move_to_end(normalized_iso2)
                 return handle, dict(handle.dataset_state)
             dataset_dir, state = self._find_local_ready_dataset(normalized_iso2, cache_dir=cache_dir)
             if dataset_dir is None:
@@ -250,8 +251,55 @@ class CadisManager:
                 return None, state_with_iso2
             handle = self._create_runtime_handle_from_dataset_dir(normalized_iso2, dataset_dir)
             handle.dataset_state.update(state)
-            self._runtime_handles[normalized_iso2] = handle
+            self._store_runtime_handle(normalized_iso2, handle)
             return handle, dict(handle.dataset_state)
+
+    def _store_runtime_handle(self, iso2: str, handle: _RuntimeHandle) -> None:
+        self._runtime_handles[iso2] = handle
+        self._runtime_handles.move_to_end(iso2)
+        self._enforce_runtime_cache_capacity()
+
+    def _enforce_runtime_cache_capacity(self) -> None:
+        if self._runtime_cache_capacity < 0:
+            return
+        while len(self._runtime_handles) > self._runtime_cache_capacity:
+            self._runtime_handles.popitem(last=False)
+
+    def hint_release(self, iso2: str) -> bool:
+        """Release a cached runtime when a batch caller knows it is no longer needed."""
+        normalized_iso2 = iso2.strip().upper()
+        with self._lock:
+            return self._runtime_handles.pop(normalized_iso2, None) is not None
+
+    def clear_runtimes(self) -> int:
+        """Release all cached country runtimes and return the number released."""
+        with self._lock:
+            count = len(self._runtime_handles)
+            self._runtime_handles.clear()
+            return count
+
+    def memory_report(self) -> dict[str, Any]:
+        """Return lightweight runtime-cache diagnostics for memory investigations."""
+        with self._lock:
+            runtimes = {
+                iso2: {
+                    "dataset_dir": handle.dataset_dir,
+                    "dataset_status": handle.dataset_state.get("status"),
+                    "backend_name": getattr(
+                        getattr(getattr(handle.runtime, "_pipeline", None), "geometry_index", None),
+                        "backend_name",
+                        None,
+                    ),
+                }
+                for iso2, handle in self._runtime_handles.items()
+            }
+            return {
+                "runtime_cache_capacity": self._runtime_cache_capacity,
+                "runtime_count": len(self._runtime_handles),
+                "loaded_iso2": list(self._runtime_handles.keys()),
+                "runtimes": runtimes,
+                "global_lookup_loaded": self._global_lookup is not None,
+            }
 
     def bootstrap_runtime(
         self,
@@ -334,7 +382,7 @@ class CadisManager:
 
         handle = self._create_runtime_handle_from_dataset_dir(normalized_iso2, dataset_dir)
         with self._lock:
-            self._runtime_handles[normalized_iso2] = handle
+            self._store_runtime_handle(normalized_iso2, handle)
 
         return {
             "bootstrap_status": "ready",
@@ -354,6 +402,16 @@ _SHARED_GLOBAL_LOOKUP_LOCK = threading.Lock()
 
 _MANAGERS: dict[tuple[str, tuple[str, ...]], CadisManager] = {}
 _MANAGERS_LOCK = threading.Lock()
+
+
+def _env_int_allow_zero(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if not isinstance(raw, str) or not raw.strip():
+        return default
+    try:
+        return int(raw.strip())
+    except ValueError:
+        return default
 
 
 def get_manager(

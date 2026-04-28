@@ -5,7 +5,16 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable
 
-from ._api import bootstrap, classify_world, info, lookup, lookup_many, reinstall
+from ._api import (
+    bootstrap,
+    classify_world,
+    clear_runtimes,
+    info,
+    lookup,
+    lookup_many,
+    memory_report,
+    reinstall,
+)
 from .types import (
     BootstrapResponse,
     InfoResponse,
@@ -58,11 +67,13 @@ class CadisSDK:
         *,
         cache_dir: str | Path | None = None,
         allowed_iso2: Iterable[str] | None = None,
+        runtime_cache_policy: str | None = None,
     ) -> list[LookupManyResponseItem]:
         return lookup_many(
             points,
             cache_dir=self._cache_dir_or_default(cache_dir),
             allowed_iso2=self._allowed_iso2_or_default(allowed_iso2),
+            runtime_cache_policy=runtime_cache_policy,
         )
 
     def classify_world(
@@ -123,6 +134,28 @@ class CadisSDK:
         allowed_iso2: Iterable[str] | None = None,
     ) -> InfoResponse:
         return info(
+            cache_dir=self._cache_dir_or_default(cache_dir),
+            allowed_iso2=self._allowed_iso2_or_default(allowed_iso2),
+        )
+
+    def memory_report(
+        self,
+        *,
+        cache_dir: str | Path | None = None,
+        allowed_iso2: Iterable[str] | None = None,
+    ) -> dict[str, object]:
+        return memory_report(
+            cache_dir=self._cache_dir_or_default(cache_dir),
+            allowed_iso2=self._allowed_iso2_or_default(allowed_iso2),
+        )
+
+    def clear_runtimes(
+        self,
+        *,
+        cache_dir: str | Path | None = None,
+        allowed_iso2: Iterable[str] | None = None,
+    ) -> int:
+        return clear_runtimes(
             cache_dir=self._cache_dir_or_default(cache_dir),
             allowed_iso2=self._allowed_iso2_or_default(allowed_iso2),
         )
