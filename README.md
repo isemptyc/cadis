@@ -117,7 +117,7 @@ Cadis does not interpret ISO codes as political statements or sovereignty declar
 | JP   | Japan            | jp.admin   | 20.4 MB               | 21.4 MB       | 2026-04-05         |
 | GB   | United Kingdom   | gb.admin   | 4.8 MB                | 5.2 MB        | 2026-04-05         |
 | IT   | Italy            | it.admin   | 22.9 MB               | 26.0 MB       | 2026-04-05         |
-| KR   | South Korea      | kr.admin   | 2.4 MB                | 3.6 MB        | 2026-04-05         |
+| KR   | Korea            | kr.admin   | 2.4 MB                | 3.6 MB        | 2026-04-05         |
 | SE   | Sweden           | se.admin   | 0.2 MB                | 0.3 MB        | 2026-04-05         |
 | NO   | Norway           | no.admin   | 0.1 MB                | 0.3 MB        | 2026-04-05         |
 | DK   | Denmark          | dk.admin   | 0.1 MB                | 0.2 MB        | 2026-04-05         |
