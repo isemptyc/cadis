@@ -210,7 +210,7 @@ Each `lookup` value is the same payload schema returned by `lookup()`. Invalid p
 
 Cadis guarantees cache-state invariance for a stable runtime environment. Stable means dataset files and versions do not change during the process lifetime, backend selection and related environment configuration remain fixed, and runtime initialization behavior is consistent without transient failures. Under those conditions, lookup results depend only on input data and installed datasets, not on whether country runtimes are cold, warm, retained, or released.
 
-`lookup_many()` cache behavior is a performance policy, not a semantic policy. `runtime_cache_policy="batch"` may release country runtimes after each group, while `runtime_cache_policy="cache"` may retain them for reuse; both modes must produce identical lookup payloads for the same inputs in a stable environment. `CADIS_RUNTIME_CACHE_SIZE=0` disables residual country runtime retention and is useful as a canonical cold-cache reference path for debugging.
+`lookup_many()` cache behavior is a performance policy, not a semantic policy. `runtime_cache_policy="batch"` may release country runtimes after each group, while `runtime_cache_policy="cache"` may retain them for reuse when the runtime cache size permits it; both modes must produce identical lookup payloads for the same inputs in a stable environment. By default, `CADIS_RUNTIME_CACHE_SIZE=0` disables residual country runtime retention so broad downstream callers can pass large batches without accumulating country runtimes across calls.
 
 Country runtime batch execution is also a performance policy. `CADIS_COUNTRY_RUNTIME_BATCH=off` is the default and uses the scalar country runtime path. Set `CADIS_COUNTRY_RUNTIME_BATCH=auto` to use the country runtime batch path only for sufficiently large same-country groups, controlled by `CADIS_COUNTRY_RUNTIME_BATCH_MIN_ROWS` with default `256`, or `on` to force batch execution. This path is most useful for large same-country batches, such as country dataset evaluation or bulk imports where most points resolve to one ISO2. It may provide little benefit for mixed-country workloads dominated by runtime loading, offshore/nearest fallback, or many small country groups.
 
@@ -824,15 +824,17 @@ Increasing the candidate count favors recall at the cost of loading more country
 
 ### Runtime Cache Profiles
 
-Cadis defaults to a memory-protective runtime profile. It keeps at most six country runtimes resident and automatically releases runtimes after `lookup_many()` country groups when a batch touches more than three ISO2 groups:
+Cadis defaults to a batch-oriented, memory-protective runtime profile. It does not retain country runtimes after use and automatically releases runtimes after `lookup_many()` country groups when a batch touches more than one ISO2 group:
 
 ```bash
-CADIS_RUNTIME_CACHE_SIZE=6
-CADIS_BATCH_AUTO_RELEASE_THRESHOLD=3
+CADIS_RUNTIME_CACHE_SIZE=0
+CADIS_BATCH_AUTO_RELEASE_THRESHOLD=1
 CADIS_COUNTRY_RUNTIME_BATCH=off
 ```
 
-This profile is appropriate for broad or memory-constrained workloads where a batch can touch many countries and unbounded runtime retention would create high peak RSS. The trade-off is repeated runtime loading in multi-batch workflows.
+This profile is appropriate for broad or memory-constrained workloads where downstream callers cannot know the country distribution before calling `lookup_many()`. It works best when callers pass as many points as practical in each call, so Cadis can classify once, group by country, process each country group, and avoid retaining residual country runtimes. The trade-off is repeated runtime loading in workflows split into many separate calls that revisit the same countries.
+
+The runtime cache and batch release threshold operate at different points in the `lookup_many()` flow. When a country runtime is needed, Cadis asks the manager for it; if it is not already cached, the manager loads it and then applies `CADIS_RUNTIME_CACHE_SIZE` when deciding whether to retain it for reuse. With the default `CADIS_RUNTIME_CACHE_SIZE=0`, that runtime is not added to the reusable cache; the local runtime handle still remains alive long enough to finish the current country group. After the group is processed, `lookup_many()` checks whether `country_count > CADIS_BATCH_AUTO_RELEASE_THRESHOLD`; if true, it calls the batch release hook for that country. With the default threshold of `1`, this hook runs for multi-country batches, but the cache-size limit is already enough to prevent residual country runtime retention for single-country and multi-country calls.
 
 For repeated multi-batch processing where the same country set is reused and memory headroom is available, use a performance profile:
 

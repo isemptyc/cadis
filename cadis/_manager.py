@@ -32,7 +32,7 @@ class CadisManager:
     ) -> None:
         self._global_lookup = None
         self._runtime_handles: OrderedDict[str, _RuntimeHandle] = OrderedDict()
-        self._runtime_cache_capacity = _env_int_allow_zero("CADIS_RUNTIME_CACHE_SIZE", 6)
+        self._runtime_cache_capacity = _env_int_allow_zero("CADIS_RUNTIME_CACHE_SIZE", 0)
         self._lock = threading.Lock()
         self._dataset_policy = dataset_policy or load_dataset_policy_from_env()
         self._default_cache_dir = (
@@ -260,6 +260,9 @@ class CadisManager:
             return handle, dict(handle.dataset_state)
 
     def _store_runtime_handle(self, iso2: str, handle: _RuntimeHandle) -> None:
+        if self._runtime_cache_capacity == 0:
+            # Explicit no-cache policy: do not retain country runtimes for reuse.
+            return
         self._runtime_handles[iso2] = handle
         self._runtime_handles.move_to_end(iso2)
         self._enforce_runtime_cache_capacity()
