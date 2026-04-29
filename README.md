@@ -138,6 +138,7 @@ Cadis does not interpret ISO codes as political statements or sovereignty declar
 | PL   | Poland           | pl.admin   | 11.4 MB               | 12.7 MB       | 2026-04-29         |
 | LU   | Luxembourg       | lu.admin   | 0.6 MB                | 0.8 MB        | 2026-04-29         |
 | CZ   | Czech Republic   | cz.admin   | 20.8 MB               | 23.7 MB       | 2026-04-29         |
+| SG   | Singapore        | sg.admin   | 0.01 MB               | 0.02 MB       | 2026-04-29         |
 
 Additional ISO 3166-1 entity datasets will be published as they become available.
 
