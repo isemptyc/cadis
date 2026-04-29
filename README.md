@@ -123,7 +123,7 @@ Cadis does not interpret ISO codes as political statements or sovereignty declar
 | DK   | Denmark          | dk.admin   | 0.1 MB                | 0.2 MB        | 2026-04-05         |
 | BE   | Belgium          | be.admin   | 2.5 MB                | 2.8 MB        | 2026-04-04         |
 | NL   | Netherlands      | nl.admin   | 2.6 MB                | 2.8 MB        | 2026-04-11         |
-| FR   | France           | fr.admin   | 79.6 MB               | 93.2 MB       | 2026-04-25         |
+| FR   | France           | fr.admin   | 24.3 MB               | 37.9 MB       | 2026-04-29         |
 | DE   | Germany          | de.admin   | 26.4 MB               | 30.6 MB       | 2026-04-27         |
 | ES   | Spain            | es.admin   | 11.3 MB               | 14.7 MB       | 2026-04-27         |
 | PT   | Portugal         | pt.admin   | 5.5 MB                | 6.8 MB        | 2026-04-27         |
