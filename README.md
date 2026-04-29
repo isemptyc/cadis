@@ -140,6 +140,7 @@ Cadis does not interpret ISO codes as political statements or sovereignty declar
 | CZ   | Czech Republic   | cz.admin   | 20.8 MB               | 23.7 MB       | 2026-04-29         |
 | SG   | Singapore        | sg.admin   | 0.01 MB               | 0.02 MB       | 2026-04-29         |
 | MY   | Malaysia         | my.admin   | 0.3 MB                | 0.5 MB        | 2026-04-29         |
+| TH   | Thailand         | th.admin   | 1.3 MB                | 2.3 MB        | 2026-04-29         |
 
 Additional ISO 3166-1 entity datasets will be published as they become available.
 
