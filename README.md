@@ -141,6 +141,7 @@ Cadis does not interpret ISO codes as political statements or sovereignty declar
 | SG   | Singapore        | sg.admin   | 0.01 MB               | 0.02 MB       | 2026-04-29         |
 | MY   | Malaysia         | my.admin   | 0.3 MB                | 0.5 MB        | 2026-04-29         |
 | TH   | Thailand         | th.admin   | 1.3 MB                | 2.3 MB        | 2026-04-29         |
+| ID   | Indonesia        | id.admin   | 6.6 MB                | 10.0 MB       | 2026-04-30         |
 
 Additional ISO 3166-1 entity datasets will be published as they become available.
 
