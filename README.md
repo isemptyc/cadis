@@ -148,6 +148,7 @@ Cadis does not interpret ISO codes as political statements or sovereignty declar
 | IN   | India            | in.admin   | 33.3 MB               | 57.4 MB       | 2026-05-10         |
 | MX   | Mexico           | mx.admin   | 1.6 MB                | 2.6 MB        | 2026-05-10         |
 | PH   | Philippines      | ph.admin   | 2.1 MB                | 3.4 MB        | 2026-05-11         |
+| VN   | Vietnam          | vn.admin   | 0.6 MB                | 1.9 MB        | 2026-05-10         |
 
 Additional ISO 3166-1 entity datasets will be published as they become available.
 
