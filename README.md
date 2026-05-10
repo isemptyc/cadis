@@ -146,6 +146,7 @@ Cadis does not interpret ISO codes as political statements or sovereignty declar
 | TR   | Turkey           | tr.admin   | 11.7 MB               | 17.4 MB       | 2026-05-10         |
 | BR   | Brazil           | br.admin   | 32.2 MB               | 37.7 MB       | 2026-05-10         |
 | IN   | India            | in.admin   | 33.3 MB               | 57.4 MB       | 2026-05-10         |
+| MX   | Mexico           | mx.admin   | 1.6 MB                | 2.6 MB        | 2026-05-10         |
 
 Additional ISO 3166-1 entity datasets will be published as they become available.
 
