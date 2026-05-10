@@ -143,6 +143,7 @@ Cadis does not interpret ISO codes as political statements or sovereignty declar
 | TH   | Thailand         | th.admin   | 1.3 MB                | 2.3 MB        | 2026-04-29         |
 | ID   | Indonesia        | id.admin   | 6.6 MB                | 10.0 MB       | 2026-04-30         |
 | GR   | Greece           | gr.admin   | 2.4 MB                | 3.1 MB        | 2026-05-10         |
+| TR   | Turkey           | tr.admin   | 11.7 MB               | 17.4 MB       | 2026-05-10         |
 
 Additional ISO 3166-1 entity datasets will be published as they become available.
 
