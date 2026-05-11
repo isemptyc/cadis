@@ -1,3 +1,3 @@
 """Canonical Cadis package version."""
 
-__version__ = "0.8.91"
+__version__ = "0.8.92"
