@@ -282,6 +282,7 @@ Cadis does not interpret ISO codes as political statements or sovereignty declar
 | UG | Uganda | ug.admin | 0.1 MB | 0.7 MB | 2026-05-11 |
 | ZM | Zambia | zm.admin | 0.1 MB | 0.2 MB | 2026-05-11 |
 | ZW | Zimbabwe | zw.admin | 0.1 MB | 0.2 MB | 2026-05-11 |
+| CN | China | cn.admin | 14.2 MB | 26.9 MB | 2026-05-12 |
 
 Additional ISO 3166-1 entity datasets will be published as they become available.
 
