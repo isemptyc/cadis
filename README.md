@@ -156,9 +156,9 @@ Cadis does not interpret ISO codes as political statements or sovereignty declar
 | PE | Peru | pe.admin | 1.2 MB | 2.0 MB | 2026-05-11 |
 | AL | Albania | al.admin | 0.7 MB | 0.9 MB | 2026-05-11 |
 | BA | Bosnia and Herzegovina | ba.admin | 0.5 MB | 0.7 MB | 2026-05-11 |
-| BG | Bulgaria | bg.admin | 6.2 MB | 7.2 MB | 2026-05-11 |
-| HR | Croatia | hr.admin | 8.1 MB | 11.0 MB | 2026-05-11 |
-| EE | Estonia | ee.admin | 6.2 MB | 8.1 MB | 2026-05-11 |
+| BG | Bulgaria | bg.admin | 0.1 MB | 0.2 MB | 2026-05-12 |
+| HR | Croatia | hr.admin | 0.3 MB | 0.5 MB | 2026-05-12 |
+| EE | Estonia | ee.admin | 0.1 MB | 0.2 MB | 2026-05-12 |
 | HU | Hungary | hu.admin | 2.1 MB | 3.4 MB | 2026-05-11 |
 | LV | Latvia | lv.admin | 1.1 MB | 1.8 MB | 2026-05-11 |
 | LT | Lithuania | lt.admin | 2.1 MB | 4.2 MB | 2026-05-11 |
@@ -166,7 +166,7 @@ Cadis does not interpret ISO codes as political statements or sovereignty declar
 | ME | Montenegro | me.admin | 0.1 MB | 0.2 MB | 2026-05-11 |
 | RO | Romania | ro.admin | 6.3 MB | 7.6 MB | 2026-05-11 |
 | RS | Serbia | rs.admin | 0.1 MB | 0.2 MB | 2026-05-12 |
-| SK | Slovakia | sk.admin | 10.5 MB | 13.3 MB | 2026-05-11 |
+| SK | Slovakia | sk.admin | 4.8 MB | 6.1 MB | 2026-05-12 |
 | SI | Slovenia | si.admin | 0.2 MB | 0.3 MB | 2026-05-11 |
 | CY | Cyprus | cy.admin | 1.3 MB | 1.5 MB | 2026-05-11 |
 | GE | Georgia | ge.admin | 0.2 MB | 0.4 MB | 2026-05-11 |
