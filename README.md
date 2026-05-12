@@ -146,7 +146,7 @@ Cadis does not interpret ISO codes as political statements or sovereignty declar
 | GR | Greece | gr.admin | 2.5 MB | 3.2 MB | 2026-05-10 |
 | TR | Turkey | tr.admin | 11.7 MB | 17.4 MB | 2026-05-10 |
 | BR | Brazil | br.admin | 32.2 MB | 37.7 MB | 2026-05-10 |
-| IN | India | in.admin | 33.3 MB | 57.4 MB | 2026-05-10 |
+| IN | India | in.admin | 2.7 MB | 5.4 MB | 2026-05-12 |
 | MX | Mexico | mx.admin | 1.6 MB | 2.6 MB | 2026-05-10 |
 | PH | Philippines | ph.admin | 2.2 MB | 3.5 MB | 2026-05-10 |
 | VN | Vietnam | vn.admin | 0.6 MB | 1.9 MB | 2026-05-10 |
