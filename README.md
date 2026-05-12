@@ -286,6 +286,7 @@ Cadis does not interpret ISO codes as political statements or sovereignty declar
 | HK | Hong Kong | hk.admin | 0.01 MB | 0.04 MB | 2026-05-12 |
 | MO | Macau | mo.admin | 0.00 MB | 0.00 MB | 2026-05-12 |
 | BY | Belarus | by.admin | 3.6 MB | 16.1 MB | 2026-05-12 |
+| GL | Greenland | gl.admin | 0.00 MB | 0.01 MB | 2026-05-12 |
 
 Additional ISO 3166-1 entity datasets will be published as they become available.
 
