@@ -165,7 +165,7 @@ Cadis does not interpret ISO codes as political statements or sovereignty declar
 | MC | Monaco | mc.admin | 0.01 MB | 0.01 MB | 2026-05-11 |
 | ME | Montenegro | me.admin | 0.1 MB | 0.2 MB | 2026-05-11 |
 | RO | Romania | ro.admin | 6.3 MB | 7.6 MB | 2026-05-11 |
-| RS | Serbia | rs.admin | 17.8 MB | 20.2 MB | 2026-05-11 |
+| RS | Serbia | rs.admin | 0.1 MB | 0.2 MB | 2026-05-12 |
 | SK | Slovakia | sk.admin | 10.5 MB | 13.3 MB | 2026-05-11 |
 | SI | Slovenia | si.admin | 0.2 MB | 0.3 MB | 2026-05-11 |
 | CY | Cyprus | cy.admin | 1.3 MB | 1.5 MB | 2026-05-11 |
