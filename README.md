@@ -206,7 +206,7 @@ Cadis does not interpret ISO codes as political statements or sovereignty declar
 | QA | Qatar | qa.admin | 0.02 MB | 0.2 MB | 2026-05-11 |
 | SA | Saudi Arabia | sa.admin | 0.5 MB | 1.8 MB | 2026-05-11 |
 | AE | United Arab Emirates | ae.admin | 0.1 MB | 0.5 MB | 2026-05-11 |
-| IR | Iran | ir.admin | 2.0 MB | 6.3 MB | 2026-05-11 |
+| IR | Iran | ir.admin | 1.5 MB | 3.5 MB | 2026-05-12 |
 | IQ | Iraq | iq.admin | 0.3 MB | 1.1 MB | 2026-05-11 |
 | IL | Israel | il.admin | 0.1 MB | 0.4 MB | 2026-05-11 |
 | PS | Palestine | ps.admin | 0.1 MB | 0.2 MB | 2026-05-11 |
