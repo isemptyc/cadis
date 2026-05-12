@@ -116,6 +116,7 @@ Cadis does not interpret ISO codes as political statements or sovereignty declar
 | TW | Taiwan | tw.admin | 1.8 MB | 2.0 MB | 2026-04-05 |
 | JP | Japan | jp.admin | 20.4 MB | 21.4 MB | 2026-04-05 |
 | GB | United Kingdom | gb.admin | 4.5 MB | 4.9 MB | 2026-05-12 |
+| IE | Ireland | ie.admin | 1.5 MB | 3.1 MB | 2026-05-12 |
 | IT | Italy | it.admin | 22.9 MB | 26.0 MB | 2026-04-05 |
 | KR | South Korea | kr.admin | 2.4 MB | 3.5 MB | 2026-04-05 |
 | SE | Sweden | se.admin | 0.2 MB | 0.3 MB | 2026-04-05 |
