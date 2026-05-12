@@ -286,7 +286,7 @@ Cadis does not interpret ISO codes as political statements or sovereignty declar
 | CN | China | cn.admin | 14.2 MB | 26.7 MB | 2026-05-12 |
 | HK | Hong Kong | hk.admin | 0.01 MB | 0.04 MB | 2026-05-12 |
 | MO | Macau | mo.admin | 0.00 MB | 0.00 MB | 2026-05-12 |
-| BY | Belarus | by.admin | 3.6 MB | 16.1 MB | 2026-05-12 |
+| BY | Belarus | by.admin | 0.9 MB | 1.7 MB | 2026-05-12 |
 | GL | Greenland | gl.admin | 0.00 MB | 0.01 MB | 2026-05-12 |
 | RU | Russia | ru.admin | 8.2 MB | 17.4 MB | 2026-05-12 |
 
