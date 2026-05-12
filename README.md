@@ -144,7 +144,7 @@ Cadis does not interpret ISO codes as political statements or sovereignty declar
 | TH | Thailand | th.admin | 1.3 MB | 2.3 MB | 2026-04-29 |
 | ID | Indonesia | id.admin | 6.9 MB | 10.4 MB | 2026-04-30 |
 | GR | Greece | gr.admin | 2.5 MB | 3.2 MB | 2026-05-10 |
-| TR | Turkey | tr.admin | 11.7 MB | 17.4 MB | 2026-05-10 |
+| TR | Turkey | tr.admin | 0.4 MB | 0.8 MB | 2026-05-12 |
 | BR | Brazil | br.admin | 4.4 MB | 6.5 MB | 2026-05-12 |
 | IN | India | in.admin | 2.7 MB | 5.4 MB | 2026-05-12 |
 | MX | Mexico | mx.admin | 1.6 MB | 2.6 MB | 2026-05-10 |
@@ -164,7 +164,7 @@ Cadis does not interpret ISO codes as political statements or sovereignty declar
 | LT | Lithuania | lt.admin | 2.1 MB | 4.2 MB | 2026-05-11 |
 | MC | Monaco | mc.admin | 0.01 MB | 0.01 MB | 2026-05-11 |
 | ME | Montenegro | me.admin | 0.1 MB | 0.2 MB | 2026-05-11 |
-| RO | Romania | ro.admin | 6.3 MB | 7.6 MB | 2026-05-11 |
+| RO | Romania | ro.admin | 6.0 MB | 7.2 MB | 2026-05-12 |
 | RS | Serbia | rs.admin | 0.1 MB | 0.2 MB | 2026-05-12 |
 | SK | Slovakia | sk.admin | 4.8 MB | 6.1 MB | 2026-05-12 |
 | SI | Slovenia | si.admin | 0.2 MB | 0.3 MB | 2026-05-11 |
