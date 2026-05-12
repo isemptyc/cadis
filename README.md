@@ -138,7 +138,7 @@ Cadis does not interpret ISO codes as political statements or sovereignty declar
 | AT | Austria | at.admin | 7.0 MB | 7.8 MB | 2026-04-29 |
 | PL | Poland | pl.admin | 11.4 MB | 12.7 MB | 2026-04-29 |
 | LU | Luxembourg | lu.admin | 0.6 MB | 0.8 MB | 2026-04-29 |
-| CZ | Czech Republic | cz.admin | 20.8 MB | 23.7 MB | 2026-04-29 |
+| CZ | Czech Republic | cz.admin | 9.4 MB | 12.2 MB | 2026-05-12 |
 | SG | Singapore | sg.admin | 0.01 MB | 0.02 MB | 2026-04-29 |
 | MY | Malaysia | my.admin | 0.3 MB | 0.5 MB | 2026-04-29 |
 | TH | Thailand | th.admin | 1.3 MB | 2.3 MB | 2026-04-29 |
