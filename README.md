@@ -283,6 +283,8 @@ Cadis does not interpret ISO codes as political statements or sovereignty declar
 | ZM | Zambia | zm.admin | 0.1 MB | 0.2 MB | 2026-05-11 |
 | ZW | Zimbabwe | zw.admin | 0.1 MB | 0.2 MB | 2026-05-11 |
 | CN | China | cn.admin | 14.2 MB | 26.9 MB | 2026-05-12 |
+| HK | Hong Kong | hk.admin | 0.01 MB | 0.04 MB | 2026-05-12 |
+| MO | Macau | mo.admin | 0.00 MB | 0.00 MB | 2026-05-12 |
 
 Additional ISO 3166-1 entity datasets will be published as they become available.
 
