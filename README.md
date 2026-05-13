@@ -133,6 +133,25 @@ Cadis does not interpret ISO codes as political statements or sovereignty declar
 | CA | Canada | ca.admin | 10.7 MB | 14.0 MB | 2026-04-27 |
 | AU | Australia | au.admin | 0.4 MB | 0.7 MB | 2026-05-12 |
 | NZ | New Zealand | nz.admin | 0.2 MB | 0.2 MB | 2026-04-28 |
+| CK | Cook Islands | ck.admin | 0.00 MB | 0.01 MB | 2026-05-13 |
+| FJ | Fiji | fj.admin | 0.02 MB | 0.03 MB | 2026-05-13 |
+| KI | Kiribati | ki.admin | 0.01 MB | 0.02 MB | 2026-05-13 |
+| MH | Marshall Islands | mh.admin | 0.01 MB | 0.02 MB | 2026-05-13 |
+| FM | Micronesia | fm.admin | 0.02 MB | 0.06 MB | 2026-05-13 |
+| NR | Nauru | nr.admin | 0.00 MB | 0.02 MB | 2026-05-13 |
+| NC | New Caledonia | nc.admin | 0.05 MB | 0.08 MB | 2026-05-13 |
+| NU | Niue | nu.admin | 0.00 MB | 0.01 MB | 2026-05-13 |
+| PW | Palau | pw.admin | 0.00 MB | 0.01 MB | 2026-05-13 |
+| PG | Papua New Guinea | pg.admin | 0.01 MB | 0.02 MB | 2026-05-13 |
+| PN | Pitcairn Islands | pn.admin | 0.00 MB | 0.01 MB | 2026-05-13 |
+| PF | French Polynesia | pf.admin | 0.1 MB | 0.2 MB | 2026-05-13 |
+| WS | Samoa | ws.admin | 0.00 MB | 0.01 MB | 2026-05-13 |
+| SB | Solomon Islands | sb.admin | 0.00 MB | 0.01 MB | 2026-05-13 |
+| TK | Tokelau | tk.admin | 0.00 MB | 0.01 MB | 2026-05-13 |
+| TO | Tonga | to.admin | 0.00 MB | 0.01 MB | 2026-05-13 |
+| TV | Tuvalu | tv.admin | 0.00 MB | 0.01 MB | 2026-05-13 |
+| VU | Vanuatu | vu.admin | 0.00 MB | 0.01 MB | 2026-05-13 |
+| WF | Wallis and Futuna | wf.admin | 0.00 MB | 0.01 MB | 2026-05-13 |
 | IS | Iceland | is.admin | 0.1 MB | 0.2 MB | 2026-04-28 |
 | CH | Switzerland | ch.admin | 3.9 MB | 4.8 MB | 2026-04-29 |
 | AT | Austria | at.admin | 7.0 MB | 7.8 MB | 2026-04-29 |
