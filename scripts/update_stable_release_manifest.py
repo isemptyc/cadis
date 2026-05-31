@@ -6,7 +6,6 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.request import urlopen
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
@@ -14,6 +13,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from cadis._api import SUPPORTED_ISO2
 from cadis.cdn.bootstrap import DEFAULT_DATASET_MANIFEST_URL
+from cadis.cdn.transport import read_json_url
 from cadis.version import __version__
 
 
@@ -22,8 +22,7 @@ def _utc_now_iso() -> str:
 
 
 def fetch_dataset_manifest(*, url: str, timeout_sec: int) -> dict[str, Any]:
-    with urlopen(url, timeout=timeout_sec) as response:
-        return json.loads(response.read().decode("utf-8"))
+    return read_json_url(url, timeout_sec=timeout_sec)
 
 
 def build_stable_manifest(

@@ -21,9 +21,7 @@ DEFAULT_REQUIRED_FILES = (
 DEFAULT_MANIFEST_NAME = "dataset_release_manifest.json"
 DEFAULT_MANIFEST_PROFILE = "cadis.dataset.release"
 DEFAULT_RUNTIME_POLICY_FILE = "runtime_policy.json"
-DEFAULT_DATASET_MANIFEST_URL = (
-    "https://raw.githubusercontent.com/isemptyc/cadis-dataset/main/releases/dataset_manifest.json"
-)
+DEFAULT_DATASET_MANIFEST_URL = "https://dataset.cadis.dev/releases/dataset_manifest.json"
 
 
 def _noop_validate_manifest(_manifest: dict[str, Any]) -> None:

@@ -5,6 +5,12 @@ from typing import Any, Callable
 from urllib.parse import urljoin, urlparse, urlunparse
 import urllib.request
 
+USER_AGENT = "cadis (+https://cadis.dev)"
+
+
+def _request(url: str) -> urllib.request.Request:
+    return urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+
 
 def repo_relative_url(base_url: str, relative_path: str) -> str:
     rel_raw = relative_path.strip()
@@ -21,12 +27,12 @@ def repo_relative_url(base_url: str, relative_path: str) -> str:
 
 
 def read_json_url(url: str, *, timeout_sec: int) -> dict[str, Any]:
-    with urllib.request.urlopen(url, timeout=timeout_sec) as response:
+    with urllib.request.urlopen(_request(url), timeout=timeout_sec) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
 def read_text_url(url: str, *, timeout_sec: int) -> str:
-    with urllib.request.urlopen(url, timeout=timeout_sec) as response:
+    with urllib.request.urlopen(_request(url), timeout=timeout_sec) as response:
         return response.read().decode("utf-8")
 
 
@@ -37,7 +43,7 @@ def read_bytes_url(
     progress: Callable[[int, int | None], None] | None = None,
     chunk_size: int = 1024 * 1024,
 ) -> bytes:
-    with urllib.request.urlopen(url, timeout=timeout_sec) as response:
+    with urllib.request.urlopen(_request(url), timeout=timeout_sec) as response:
         total: int | None = None
         length_header = response.headers.get("Content-Length")
         if length_header and length_header.isdigit():
