@@ -18,6 +18,7 @@ from typing import Any, Callable, Iterable
 
 from ._cache import resolve_cache_dir
 from ._country_names import country_name_for_iso2
+from ._errors import normalize_reason
 from ._manager import get_manager
 from .types import (
     BootstrapResponse,
@@ -936,6 +937,7 @@ def lookup(
 
     iso2 = _extract_iso2(world_context)
     if iso2 is None and world_state.get("classification") == "open_sea":
+        waterbody_name = _lookup_waterbody(manager, lat=float(lat), lon=float(lon))
         retried = _retry_open_sea_with_candidate_runtime(
             manager=manager,
             lat=float(lat),
@@ -949,6 +951,11 @@ def lookup(
                 "classification": "country",
                 "iso2": iso2,
             }
+        else:
+            return _open_sea_output(
+                world_state=world_state,
+                waterbody=waterbody_name,
+            )
     if iso2 is None:
         return _failed_output(state={"world": world_state})
 
@@ -960,6 +967,32 @@ def lookup(
         lon=float(lon),
         cache_dir=cache_dir,
     )
+
+
+def _lookup_waterbody(manager: Any, *, lat: float, lon: float) -> str | None:
+    try:
+        idx = manager.get_waterbody_index()
+        if idx is None:
+            return None
+        return idx.lookup(lat, lon)
+    except Exception:
+        return None
+
+
+def _open_sea_output(*, world_state: WorldState, waterbody: str | None) -> LookupResponse:
+    result: dict[str, Any] = {"world": dict(world_state)}
+    if waterbody is not None:
+        result["waterbody"] = waterbody
+    return {
+        "engine": "cadis",
+        "version": VERSION,
+        "execution": {
+            "lookup_status": "ok",
+            "resolution_state": "open_sea",
+        },
+        "state": {"world": world_state},
+        "result": result,
+    }
 
 
 def _lookup_country(
@@ -1753,6 +1786,24 @@ def reinstall(
         update_to_latest=update_to_latest,
         download_progress=download_progress,
     )
+
+
+def bootstrap_waterbody(
+    *,
+    cache_dir: str | Path | None = None,
+    force_reinstall: bool = False,
+) -> dict[str, Any]:
+    """Download and install the global waterbody dataset."""
+    manager = get_manager(cache_dir=cache_dir)
+    try:
+        return manager.bootstrap_waterbody(cache_dir=cache_dir, force_reinstall=force_reinstall)
+    except Exception as exc:
+        return {
+            "engine": "cadis",
+            "version": VERSION,
+            "bootstrap_status": "failed",
+            "error": normalize_reason(exc),
+        }
 
 
 def info(

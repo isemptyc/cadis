@@ -12,6 +12,7 @@ from typing import Any, Callable, Iterable
 from ._cache import resolve_cache_dir
 from ._errors import normalize_reason
 from ._policy import DatasetPolicy, load_dataset_policy_from_env, make_dataset_policy
+from .waterbody import WaterbodyIndex
 
 
 @dataclass
@@ -31,6 +32,7 @@ class CadisManager:
         default_cache_dir: str | Path | None = None,
     ) -> None:
         self._global_lookup = None
+        self._waterbody_index: WaterbodyIndex | None = None
         self._runtime_handles: OrderedDict[str, _RuntimeHandle] = OrderedDict()
         self._runtime_cache_capacity = _env_int_allow_zero("CADIS_RUNTIME_CACHE_SIZE", 0)
         self._lock = threading.Lock()
@@ -155,6 +157,46 @@ class CadisManager:
                 return self._default_cache_dir
             return resolve_cache_dir()
         return Path(cache_dir).expanduser()
+
+    def bootstrap_waterbody(
+        self,
+        *,
+        cache_dir: str | Path | None = None,
+        force_reinstall: bool = False,
+    ) -> dict[str, Any]:
+        from .cdn.bootstrap import install_global_dataset
+        cache_root = self._resolve_cache_root(cache_dir)
+        result = install_global_dataset(
+            dataset_id="waterbody.global",
+            cache_root=cache_root,
+            force_reinstall=force_reinstall,
+        )
+        dataset_dir = Path(result["dataset_dir"])
+        with self._lock:
+            self._waterbody_index = WaterbodyIndex(dataset_dir)
+        return result
+
+    def get_waterbody_index(self) -> WaterbodyIndex | None:
+        with self._lock:
+            if self._waterbody_index is not None:
+                return self._waterbody_index
+            # Lazy-load if already installed on disk.
+            cache_root = self._resolve_cache_root()
+            dataset_dir = cache_root / "_global" / "waterbody.global"
+            if dataset_dir.exists():
+                versions = sorted(
+                    (d for d in dataset_dir.iterdir() if d.is_dir()),
+                    key=lambda d: d.name,
+                    reverse=True,
+                )
+                for version_dir in versions:
+                    if (version_dir / "waterbody.ffsf").exists():
+                        try:
+                            self._waterbody_index = WaterbodyIndex(version_dir)
+                        except Exception:
+                            pass
+                        break
+            return self._waterbody_index
 
     def _versions_root(self, iso2: str, *, cache_dir: str | Path | None = None) -> Path:
         cache_dir = self._resolve_cache_root(cache_dir)

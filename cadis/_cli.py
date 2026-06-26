@@ -28,7 +28,8 @@ def _build_parser() -> argparse.ArgumentParser:
     info_parser.add_argument("--json", action="store_true", dest="as_json")
 
     prepare_parser = subparsers.add_parser("prepare")
-    prepare_parser.add_argument("--iso2", required=True)
+    prepare_parser.add_argument("--iso2")
+    prepare_parser.add_argument("--waterbody", action="store_true", default=False)
     prepare_parser.add_argument("--dataset-version")
     prepare_parser.add_argument("--output-dir")
     return parser
@@ -295,7 +296,17 @@ def _print_lookup_human(payload: dict[str, Any], *, lat: float, lon: float) -> i
     if not country_name:
         country_name = _region_from_state(payload)
 
-    print(f"Region: {country_name}")
+    waterbody = result.get("waterbody") if isinstance(result, dict) else None
+
+    if country_name:
+        print(f"Region: {country_name}")
+    elif waterbody:
+        print("Region: Ocean")
+    else:
+        print(f"Region: {country_name}")
+
+    if waterbody:
+        print(f"Water Body: {waterbody}")
 
     def _print_hierarchy(result_payload: dict[str, Any]) -> None:
         hierarchy = result_payload.get("admin_hierarchy")
@@ -381,6 +392,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.command == "prepare":
+        if getattr(args, "waterbody", False):
+            from .cdn.bootstrap import install_global_dataset
+            progress, finish_progress = _render_download_progress()
+            try:
+                result = install_global_dataset(
+                    dataset_id="waterbody.global",
+                    cache_root=args.output_dir or str(resolve_cache_dir()),
+                    download_progress=progress,
+                )
+            finally:
+                finish_progress()
+            dataset_dir = result.get("dataset_dir", "")
+            cached = result.get("used_cached_dataset", False)
+            print(f"Waterbody dataset {'already installed' if cached else 'installed'}: {dataset_dir}")
+            return 0
+
+        if not getattr(args, "iso2", None):
+            print("prepare requires --iso2 <code> or --waterbody")
+            return 1
+
         progress, finish_progress = _render_download_progress()
         try:
             prepared = api_bootstrap(
