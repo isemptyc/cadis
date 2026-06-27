@@ -177,28 +177,9 @@ class CadisManager:
         return result
 
     def get_waterbody_index(self) -> WaterbodyIndex | None:
+        # The water body dataset is pinned: served from the version bundled in the
+        # package (like the CGD world classifier), with no cache lookup or fallback.
         with self._lock:
-            if self._waterbody_index is not None:
-                return self._waterbody_index
-            # Prefer a copy installed in the cache (lets `prepare --waterbody` ship a
-            # newer version than the one bundled in the wheel).
-            cache_root = self._resolve_cache_root()
-            dataset_dir = cache_root / "_global" / "waterbody.global"
-            if dataset_dir.exists():
-                versions = sorted(
-                    (d for d in dataset_dir.iterdir() if d.is_dir()),
-                    key=lambda d: d.name,
-                    reverse=True,
-                )
-                for version_dir in versions:
-                    if (version_dir / "waterbody.ffsf").exists():
-                        try:
-                            self._waterbody_index = WaterbodyIndex(version_dir)
-                        except Exception:
-                            pass
-                        break
-            # Fall back to the dataset bundled in the package, so named-water-body
-            # resolution works out of the box with no download (like the CGD).
             if self._waterbody_index is None:
                 self._waterbody_index = WaterbodyIndex.from_bundled()
             return self._waterbody_index

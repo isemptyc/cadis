@@ -57,11 +57,18 @@ def _write_waterbody_dataset(version_dir: Path, polygon: dict) -> None:
     )
 
 
-def _install_waterbody(cache_root: Path) -> None:
-    _write_waterbody_dataset(
-        cache_root / "_global" / "waterbody.global" / "v1.0.3",
-        FIXTURE["waterbody_polygon"],
-    )
+def _patch_bundled_waterbody(monkeypatch, tmp_path: Path) -> None:
+    """Make the pinned/bundled water body loader serve the synthetic fixture polygon.
+
+    The water body index is served only from the package-bundled dataset (no cache
+    fallback), so tests inject their controlled polygon by patching `from_bundled`.
+    """
+    from cadis.waterbody.waterbody_index import WaterbodyIndex
+
+    version_dir = tmp_path / "_bundled_waterbody"
+    _write_waterbody_dataset(version_dir, FIXTURE["waterbody_polygon"])
+    index = WaterbodyIndex(version_dir)
+    monkeypatch.setattr(WaterbodyIndex, "from_bundled", staticmethod(lambda: index))
 
 
 # --------------------------------------------------------------------------- #
@@ -152,7 +159,7 @@ def test_lookup_land_point_attaches_waterbody(monkeypatch, tmp_path: Path) -> No
         cache_root / FIXTURE["country"]["iso2"] / "it.admin" / "v1.0.1",
         bbox=tuple(FIXTURE["country"]["scope_bbox"]),
     )
-    _install_waterbody(cache_root)
+    _patch_bundled_waterbody(monkeypatch, tmp_path)
     monkeypatch.setenv("CADIS_CACHE_DIR", str(cache_root))
 
     point = next(p for p in FIXTURE["points"] if p["id"] == "land-inside-bay")
@@ -182,7 +189,7 @@ def test_lookup_land_point_outside_waterbody_has_no_waterbody(monkeypatch, tmp_p
         cache_root / FIXTURE["country"]["iso2"] / "it.admin" / "v1.0.1",
         bbox=tuple(FIXTURE["country"]["scope_bbox"]),
     )
-    _install_waterbody(cache_root)
+    _patch_bundled_waterbody(monkeypatch, tmp_path)
     monkeypatch.setenv("CADIS_CACHE_DIR", str(cache_root))
 
     point = next(p for p in FIXTURE["points"] if p["id"] == "land-outside-bay")
@@ -219,7 +226,7 @@ def test_lookup_open_sea_point_attaches_waterbody(monkeypatch, tmp_path: Path) -
 
     cache_root = tmp_path
     # No country dataset installed → offshore retry finds no candidate.
-    _install_waterbody(cache_root)
+    _patch_bundled_waterbody(monkeypatch, tmp_path)
     monkeypatch.setenv("CADIS_CACHE_DIR", str(cache_root))
 
     point = next(p for p in FIXTURE["points"] if p["id"] == "open-sea-inside-bay")
