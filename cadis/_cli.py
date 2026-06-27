@@ -306,25 +306,52 @@ def _offer_open_sea_download(candidates: list[Any]) -> tuple[int, bool]:
     return 0, False
 
 
-def _print_lookup_human(payload: dict[str, Any], *, lat: float, lon: float) -> int:
-    execution = payload.get("execution")
-    if isinstance(execution, dict):
-        status = execution.get("lookup_status")
-    else:
-        status = payload.get("lookup_status")
+def _print_hierarchy(result_payload: dict[str, Any]) -> None:
+    hierarchy = result_payload.get("admin_hierarchy")
+    if not isinstance(hierarchy, list):
+        return
+    for node in hierarchy:
+        if not isinstance(node, dict):
+            continue
+        rank = node.get("rank")
+        name = node.get("name")
+        names = node.get("names", {})
 
+        primary_lang = None
+        if isinstance(names, dict):
+            for lang, val in names.items():
+                if val == name:
+                    primary_lang = lang
+                    break
+
+        line = f"Rank {rank}: {name}"
+        if primary_lang:
+            line += f"({primary_lang})"
+        print(line)
+
+        if isinstance(names, dict):
+            for lang, val in names.items():
+                if val == name:
+                    continue
+                print(f"        {val}({lang})")
+
+
+def _render_lookup_summary(payload: dict[str, Any]) -> None:
+    """Print Region + Water Body + admin hierarchy for a lookup payload.
+
+    Used for both the initial render and the post-download retry, so a water body
+    surfaces even when a dataset had to be installed first.
+    """
     result = payload.get("result")
     if not isinstance(result, dict):
         result = {}
-    country = result.get("country")
-    if not isinstance(country, dict):
-        country = {}
-    country_name = country.get("name")
 
+    country = result.get("country")
+    country_name = country.get("name") if isinstance(country, dict) else None
     if not country_name:
         country_name = _region_from_state(payload)
 
-    waterbody = result.get("waterbody") if isinstance(result, dict) else None
+    waterbody = result.get("waterbody")
     if isinstance(waterbody, dict):
         waterbody_name = waterbody.get("name")
         waterbody_names = waterbody.get("names") if isinstance(waterbody.get("names"), dict) else {}
@@ -348,38 +375,30 @@ def _print_lookup_human(payload: dict[str, Any], *, lat: float, lon: float) -> i
             if val != waterbody_name:
                 print(f"        {val}({lang})")
 
-    def _print_hierarchy(result_payload: dict[str, Any]) -> None:
-        hierarchy = result_payload.get("admin_hierarchy")
-        if not isinstance(hierarchy, list):
-            return
-        for node in hierarchy:
-            if not isinstance(node, dict):
-                continue
-            rank = node.get("rank")
-            name = node.get("name")
-            names = node.get("names", {})
-
-            primary_lang = None
-            if isinstance(names, dict):
-                for lang, val in names.items():
-                    if val == name:
-                        primary_lang = lang
-                        break
-
-            line = f"Rank {rank}: {name}"
-            if primary_lang:
-                line += f"({primary_lang})"
-            print(line)
-
-            if isinstance(names, dict):
-                for lang, val in names.items():
-                    if val == name:
-                        continue
-                    print(f"        {val}({lang})")
-
     _print_hierarchy(result)
 
-    download_candidates = result.get("download_candidates") if isinstance(result, dict) else None
+
+def _retry_status(retry_payload: dict[str, Any]) -> object:
+    retry_execution = retry_payload.get("execution")
+    if isinstance(retry_execution, dict):
+        return retry_execution.get("lookup_status")
+    return retry_payload.get("lookup_status")
+
+
+def _print_lookup_human(payload: dict[str, Any], *, lat: float, lon: float) -> int:
+    execution = payload.get("execution")
+    if isinstance(execution, dict):
+        status = execution.get("lookup_status")
+    else:
+        status = payload.get("lookup_status")
+
+    _render_lookup_summary(payload)
+
+    result = payload.get("result")
+    if not isinstance(result, dict):
+        result = {}
+
+    download_candidates = result.get("download_candidates")
     if status in {"ok", "partial"} and isinstance(download_candidates, list) and download_candidates:
         _code, should_retry = _offer_open_sea_download(download_candidates)
         if should_retry:
@@ -387,23 +406,8 @@ def _print_lookup_human(payload: dict[str, Any], *, lat: float, lon: float) -> i
             if not isinstance(retry_payload, dict):
                 print("Lookup failed: internal_error")
                 return 1
-            retry_execution = retry_payload.get("execution")
-            if isinstance(retry_execution, dict):
-                retry_status = retry_execution.get("lookup_status")
-            else:
-                retry_status = retry_payload.get("lookup_status")
-
-            retry_result = retry_payload.get("result")
-            if not isinstance(retry_result, dict):
-                retry_result = {}
-            retry_country = retry_result.get("country")
-            if not isinstance(retry_country, dict):
-                retry_country = {}
-            retry_country_name = retry_country.get("name") or _region_from_state(retry_payload)
-
-            print(f"Region: {retry_country_name}")
-            _print_hierarchy(retry_result)
-            return 0 if retry_status in {"ok", "partial"} else 1
+            _render_lookup_summary(retry_payload)
+            return 0 if _retry_status(retry_payload) in {"ok", "partial"} else 1
 
     if status == "failed":
         code, should_retry = _maybe_run_remediation(payload)
@@ -414,27 +418,8 @@ def _print_lookup_human(payload: dict[str, Any], *, lat: float, lon: float) -> i
         if not isinstance(retry_payload, dict):
             print("Lookup failed: internal_error")
             return 1
-
-        retry_execution = retry_payload.get("execution")
-        if isinstance(retry_execution, dict):
-            retry_status = retry_execution.get("lookup_status")
-        else:
-            retry_status = retry_payload.get("lookup_status")
-        
-        # Recalculate summary for retry
-        retry_result = retry_payload.get("result")
-        if not isinstance(retry_result, dict):
-            retry_result = {}
-        retry_country = retry_result.get("country")
-        if not isinstance(retry_country, dict):
-            retry_country = {}
-        retry_country_name = retry_country.get("name")
-        if not retry_country_name:
-            retry_country_name = _region_from_state(retry_payload)
-
-        print(f"Region: {retry_country_name}")
-        _print_hierarchy(retry_result)
-        return 0 if retry_status in {"ok", "partial"} else 1
+        _render_lookup_summary(retry_payload)
+        return 0 if _retry_status(retry_payload) in {"ok", "partial"} else 1
 
     if status == "partial":
         return 0
