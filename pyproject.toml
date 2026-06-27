@@ -34,6 +34,7 @@ include = [
 
 [tool.setuptools.package-data]
 "cadis.world" = ["data/*.cgd", "data/*.md"]
+"cadis.waterbody" = ["data/*.ffsf", "data/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

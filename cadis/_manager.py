@@ -180,7 +180,8 @@ class CadisManager:
         with self._lock:
             if self._waterbody_index is not None:
                 return self._waterbody_index
-            # Lazy-load if already installed on disk.
+            # Prefer a copy installed in the cache (lets `prepare --waterbody` ship a
+            # newer version than the one bundled in the wheel).
             cache_root = self._resolve_cache_root()
             dataset_dir = cache_root / "_global" / "waterbody.global"
             if dataset_dir.exists():
@@ -196,6 +197,10 @@ class CadisManager:
                         except Exception:
                             pass
                         break
+            # Fall back to the dataset bundled in the package, so named-water-body
+            # resolution works out of the box with no download (like the CGD).
+            if self._waterbody_index is None:
+                self._waterbody_index = WaterbodyIndex.from_bundled()
             return self._waterbody_index
 
     def _versions_root(self, iso2: str, *, cache_dir: str | Path | None = None) -> Path:

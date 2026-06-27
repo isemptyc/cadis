@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import importlib.resources
 import json
 import math
 import struct
 from dataclasses import dataclass
 from pathlib import Path
+
+# Version of the water body dataset bundled under cadis/waterbody/data/. Embedded
+# in the wheel (like the CGD world classifier) so named-water-body resolution works
+# out of the box with no download. A newer copy installed in the cache overrides it.
+BUNDLED_WATERBODY_VERSION = "v1.0.5"
 
 
 def _quantize(value: float, min_value: float, span: float) -> int:
@@ -126,6 +132,28 @@ class WaterbodyIndex:
 
         if len(self._features) != len(self._meta):
             raise ValueError("Feature count mismatch between FFSF and waterbody_meta.json")
+
+    @classmethod
+    def bundled_data_dir(cls) -> Path | None:
+        """Path to the wheel-bundled water body dataset dir, or None if not packaged."""
+        try:
+            data_dir = importlib.resources.files("cadis.waterbody").joinpath("data")
+            if data_dir.joinpath("waterbody.ffsf").is_file():
+                return Path(str(data_dir))
+        except Exception:
+            return None
+        return None
+
+    @classmethod
+    def from_bundled(cls) -> "WaterbodyIndex | None":
+        """Load the water body index from the dataset bundled in the package, or None."""
+        data_dir = cls.bundled_data_dir()
+        if data_dir is None:
+            return None
+        try:
+            return cls(data_dir)
+        except Exception:
+            return None
 
     def lookup(self, lat: float, lon: float) -> str | None:
         record = self.lookup_record(lat, lon)
