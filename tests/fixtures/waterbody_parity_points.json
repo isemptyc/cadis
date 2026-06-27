@@ -1,0 +1,42 @@
+{
+  "description": "Engine-neutral parity fixture for waterbody-on-land behaviour ported from Swift CadisKit. A coordinate may fall inside both an administrative polygon and a named water body; both must be surfaced. Reusable for Swift cross-checks (cadis-lookup) against the same coordinates.",
+  "waterbody_polygon": {
+    "feature_id": "wb_test_bay",
+    "name": "Test Bay",
+    "names": { "en": "Test Bay", "zh": "測試灣" },
+    "bbox": [12.0, 44.0, 13.0, 46.0]
+  },
+  "country": {
+    "iso2": "IT",
+    "name": "Italy",
+    "admin_hierarchy": [
+      { "name": "Veneto" },
+      { "name": "Citta Metropolitana di Venezia" },
+      { "name": "Venezia" }
+    ],
+    "scope_bbox": [12.0, 44.8, 12.5, 45.2]
+  },
+  "points": [
+    {
+      "id": "land-inside-bay",
+      "lat": 45.0,
+      "lon": 12.3,
+      "world": "country",
+      "expect": { "iso2": "IT", "admin_last": "Venezia", "waterbody": "Test Bay" }
+    },
+    {
+      "id": "land-outside-bay",
+      "lat": 45.0,
+      "lon": 9.0,
+      "world": "country",
+      "expect": { "iso2": "IT", "admin_last": "Venezia", "waterbody": null }
+    },
+    {
+      "id": "open-sea-inside-bay",
+      "lat": 45.6,
+      "lon": 12.6,
+      "world": "open_sea",
+      "expect": { "iso2": null, "admin_last": null, "waterbody": "Test Bay" }
+    }
+  ]
+}

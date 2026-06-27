@@ -297,16 +297,28 @@ def _print_lookup_human(payload: dict[str, Any], *, lat: float, lon: float) -> i
         country_name = _region_from_state(payload)
 
     waterbody = result.get("waterbody") if isinstance(result, dict) else None
+    if isinstance(waterbody, dict):
+        waterbody_name = waterbody.get("name")
+        waterbody_names = waterbody.get("names") if isinstance(waterbody.get("names"), dict) else {}
+    elif isinstance(waterbody, str):  # back-compat with the flat name shape
+        waterbody_name = waterbody
+        waterbody_names = {}
+    else:
+        waterbody_name = None
+        waterbody_names = {}
 
     if country_name:
         print(f"Region: {country_name}")
-    elif waterbody:
+    elif waterbody_name:
         print("Region: Ocean")
     else:
         print(f"Region: {country_name}")
 
-    if waterbody:
-        print(f"Water Body: {waterbody}")
+    if waterbody_name:
+        print(f"Water Body: {waterbody_name}")
+        for lang, val in waterbody_names.items():
+            if val != waterbody_name:
+                print(f"        {val}({lang})")
 
     def _print_hierarchy(result_payload: dict[str, Any]) -> None:
         hierarchy = result_payload.get("admin_hierarchy")

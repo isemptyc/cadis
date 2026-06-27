@@ -128,11 +128,29 @@ class WaterbodyIndex:
             raise ValueError("Feature count mismatch between FFSF and waterbody_meta.json")
 
     def lookup(self, lat: float, lon: float) -> str | None:
+        record = self.lookup_record(lat, lon)
+        return record["name"] if record is not None else None
+
+    def lookup_record(self, lat: float, lon: float) -> dict | None:
+        """Return the structured record for the first matching water body, or None.
+
+        Shape: ``{"name": str, "feature_id": str | None, "names"?: dict[str, str]}``.
+        ``names`` is included only when the dataset carries a non-empty localization
+        map, mirroring the admin-hierarchy node convention. A feature whose primary
+        ``name`` is empty is treated as no hit (same as the name-only ``lookup``).
+        """
         for feature_idx, feature in enumerate(self._features):
             for part_idx in range(feature.part_start, feature.part_start + feature.part_count):
                 if self._part_contains(part_idx, lon, lat):
                     meta = self._meta[feature_idx]
-                    return meta.get("name") or None
+                    name = meta.get("name")
+                    if not name:
+                        return None
+                    record: dict = {"name": name, "feature_id": meta.get("feature_id")}
+                    names = meta.get("names")
+                    if isinstance(names, dict) and names:
+                        record["names"] = names
+                    return record
         return None
 
     def _part_contains(self, part_idx: int, lon: float, lat: float) -> bool:

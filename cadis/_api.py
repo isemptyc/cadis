@@ -937,7 +937,6 @@ def lookup(
 
     iso2 = _extract_iso2(world_context)
     if iso2 is None and world_state.get("classification") == "open_sea":
-        waterbody_name = _lookup_waterbody(manager, lat=float(lat), lon=float(lon))
         retried = _retry_open_sea_with_candidate_runtime(
             manager=manager,
             lat=float(lat),
@@ -945,6 +944,9 @@ def lookup(
             cache_dir=cache_dir,
         )
         if retried is not None:
+            # Promoted to a country (NE coastal gap / GPS drift within offshore
+            # range): _lookup_country attaches the water body alongside the admin
+            # hierarchy, so the coordinate can surface both.
             iso2, _ = retried
             world_state = {
                 "status": "ok",
@@ -954,7 +956,7 @@ def lookup(
         else:
             return _open_sea_output(
                 world_state=world_state,
-                waterbody=waterbody_name,
+                waterbody=_lookup_waterbody(manager, lat=float(lat), lon=float(lon)),
             )
     if iso2 is None:
         return _failed_output(state={"world": world_state})
@@ -969,17 +971,24 @@ def lookup(
     )
 
 
-def _lookup_waterbody(manager: Any, *, lat: float, lon: float) -> str | None:
+def _lookup_waterbody(manager: Any, *, lat: float, lon: float) -> dict | None:
+    """Structured water-body record for a coordinate, or None.
+
+    Queried for every resolved point (land or open sea) so a coordinate that falls
+    inside both an administrative polygon and a named water body surfaces both —
+    matching the Swift `CadisKit.lookup` behaviour. Shape:
+    ``{"name": str, "feature_id": str | None, "names"?: dict[str, str]}``.
+    """
     try:
         idx = manager.get_waterbody_index()
         if idx is None:
             return None
-        return idx.lookup(lat, lon)
+        return idx.lookup_record(lat, lon)
     except Exception:
         return None
 
 
-def _open_sea_output(*, world_state: WorldState, waterbody: str | None) -> LookupResponse:
+def _open_sea_output(*, world_state: WorldState, waterbody: dict | None) -> LookupResponse:
     result: dict[str, Any] = {"world": dict(world_state)}
     if waterbody is not None:
         result["waterbody"] = waterbody
@@ -1037,6 +1046,14 @@ def _lookup_country(
     if runtime_status not in {"ok", "partial", "failed"}:
         runtime_status = "failed"
 
+    # A land coordinate may also fall inside a named water body (lake, river,
+    # bay, coastal sea). Attach it alongside the admin hierarchy so both surface,
+    # mirroring Swift's CadisKit.lookup. nil when the index is absent or no hit.
+    result_payload = admin_result.get("result")
+    waterbody = _lookup_waterbody(manager, lat=lat, lon=lon)
+    if waterbody is not None and isinstance(result_payload, dict):
+        result_payload = {**result_payload, "waterbody": waterbody}
+
     return {
         "engine": "cadis",
         "version": VERSION,
@@ -1051,7 +1068,7 @@ def _lookup_country(
             "world": world_state,
             "dataset": runtime_handle.dataset_state,
         },
-        "result": admin_result.get("result"),
+        "result": result_payload,
     }
 
 
