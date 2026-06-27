@@ -144,6 +144,35 @@ class CGDReader:
             return best_named_ocean
         return first_hit
 
+    def country_bbox_candidates(self, lon: float, lat: float) -> list[str]:
+        """ISO2 codes of country polygons whose bounding box contains the point.
+
+        Ordered most-specific first (smallest bbox area) and de-duplicated. Coarse
+        by design: used to offer a dataset download for points the world classifier
+        placed in open water (e.g. an inland river cut out of the land polygon) that
+        may actually sit inside a not-yet-installed country. The post-install admin
+        lookup remains the real arbiter — a wrong guess just resolves back to open sea.
+        """
+        if not (-180.0 <= lon <= 180.0 and -90.0 <= lat <= 90.0):
+            return []
+        hits: list[tuple[float, str]] = []
+        for poly in self._polygons:
+            if not (poly.flags & FLAG_COUNTRY) or not poly.iso2:
+                continue
+            min_lon, min_lat, max_lon, max_lat = poly.bbox
+            if not (min_lon <= lon <= max_lon and min_lat <= lat <= max_lat):
+                continue
+            area = (max_lon - min_lon) * (max_lat - min_lat)
+            hits.append((area, poly.iso2.upper()))
+        hits.sort(key=lambda item: item[0])
+        out: list[str] = []
+        seen: set[str] = set()
+        for _area, iso2 in hits:
+            if iso2 not in seen:
+                seen.add(iso2)
+                out.append(iso2)
+        return out
+
     def lookup_many_lons_lats(self, lons: object, lats: object) -> list[Optional[dict]]:
         lon_values = list(lons)  # type: ignore[arg-type]
         lat_values = list(lats)  # type: ignore[arg-type]

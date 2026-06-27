@@ -957,6 +957,9 @@ def lookup(
             return _open_sea_output(
                 world_state=world_state,
                 waterbody=_lookup_waterbody(manager, lat=float(lat), lon=float(lon)),
+                download_candidates=_open_sea_download_candidates(
+                    manager, lat=float(lat), lon=float(lon), cache_dir=cache_dir
+                ),
             )
     if iso2 is None:
         return _failed_output(state={"world": world_state})
@@ -988,10 +991,62 @@ def _lookup_waterbody(manager: Any, *, lat: float, lon: float) -> dict | None:
         return None
 
 
-def _open_sea_output(*, world_state: WorldState, waterbody: dict | None) -> LookupResponse:
+def _open_sea_download_candidates(
+    manager: Any,
+    *,
+    lat: float,
+    lon: float,
+    cache_dir: str | Path | None = None,
+    limit: int = 3,
+) -> list[dict[str, str]]:
+    """Supported, not-yet-installed countries whose world-data bbox contains the point.
+
+    The world classifier marks inland rivers (and other coastal gaps) as open sea, so
+    a point genuinely inside a country can resolve to open sea before that country's
+    dataset is installed. This surfaces those countries as download candidates so the
+    caller (CLI/SDK) can offer to install one and re-resolve. Ordered most-specific
+    first; empty when nothing applies (incl. backends without bbox candidates).
+    """
+    try:
+        global_lookup = manager.get_or_init_global_lookup()
+    except Exception:
+        return []
+    candidates_fn = getattr(global_lookup, "country_bbox_candidates", None)
+    if candidates_fn is None:
+        return []
+    try:
+        iso2s = candidates_fn(lat, lon)
+    except Exception:
+        return []
+    if not iso2s:
+        return []
+
+    installed = set(_installed_iso2_from_cache(cache_dir))
+    is_allowed = getattr(manager, "is_iso2_allowed", None)
+    out: list[dict[str, str]] = []
+    for raw in iso2s:
+        iso2 = str(raw).upper()
+        if iso2 not in SUPPORTED_ISO2 or iso2 in installed:
+            continue
+        if callable(is_allowed) and not is_allowed(iso2):
+            continue
+        out.append({"iso2": iso2, "name": country_name_for_iso2(iso2) or iso2})
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _open_sea_output(
+    *,
+    world_state: WorldState,
+    waterbody: dict | None,
+    download_candidates: list[dict[str, str]] | None = None,
+) -> LookupResponse:
     result: dict[str, Any] = {"world": dict(world_state)}
     if waterbody is not None:
         result["waterbody"] = waterbody
+    if download_candidates:
+        result["download_candidates"] = download_candidates
     return {
         "engine": "cadis",
         "version": VERSION,

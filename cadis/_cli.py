@@ -278,6 +278,35 @@ def _maybe_run_remediation(payload: dict[str, Any]) -> tuple[int, bool]:
     return 1, False
 
 
+def _offer_open_sea_download(candidates: list[Any]) -> tuple[int, bool]:
+    """Offer to install the best candidate country's dataset for an open-sea point.
+
+    Returns (exit_code, should_retry). Declining is not an error — open sea is a
+    valid result — so a decline returns (0, False).
+    """
+    best = candidates[0] if candidates and isinstance(candidates[0], dict) else None
+    if not isinstance(best, dict):
+        return 0, False
+    iso2 = best.get("iso2")
+    if not iso2:
+        return 0, False
+    label = best.get("name") or _country_label(iso2)
+    if _confirm(
+        f"This point is in open water, but it may fall inside {label}.\n"
+        f"Download {label} dataset to check for a precise location? (y/N) "
+    ):
+        progress, finish_progress = _render_download_progress()
+        try:
+            remediation = api_reinstall(iso2, download_progress=progress)
+        finally:
+            finish_progress()
+        if remediation.get("bootstrap_status") == "ready":
+            return 0, True
+        print("Dataset installation failed.")
+        return 1, False
+    return 0, False
+
+
 def _print_lookup_human(payload: dict[str, Any], *, lat: float, lon: float) -> int:
     execution = payload.get("execution")
     if isinstance(execution, dict):
@@ -350,6 +379,32 @@ def _print_lookup_human(payload: dict[str, Any], *, lat: float, lon: float) -> i
                     print(f"        {val}({lang})")
 
     _print_hierarchy(result)
+
+    download_candidates = result.get("download_candidates") if isinstance(result, dict) else None
+    if status in {"ok", "partial"} and isinstance(download_candidates, list) and download_candidates:
+        _code, should_retry = _offer_open_sea_download(download_candidates)
+        if should_retry:
+            retry_payload = api_lookup(lat, lon)
+            if not isinstance(retry_payload, dict):
+                print("Lookup failed: internal_error")
+                return 1
+            retry_execution = retry_payload.get("execution")
+            if isinstance(retry_execution, dict):
+                retry_status = retry_execution.get("lookup_status")
+            else:
+                retry_status = retry_payload.get("lookup_status")
+
+            retry_result = retry_payload.get("result")
+            if not isinstance(retry_result, dict):
+                retry_result = {}
+            retry_country = retry_result.get("country")
+            if not isinstance(retry_country, dict):
+                retry_country = {}
+            retry_country_name = retry_country.get("name") or _region_from_state(retry_payload)
+
+            print(f"Region: {retry_country_name}")
+            _print_hierarchy(retry_result)
+            return 0 if retry_status in {"ok", "partial"} else 1
 
     if status == "failed":
         code, should_retry = _maybe_run_remediation(payload)

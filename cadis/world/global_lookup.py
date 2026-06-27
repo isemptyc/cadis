@@ -83,6 +83,20 @@ class GlobalLookup:
             "world_context": world_context,
         }
 
+    def country_bbox_candidates(self, lat: float, lon: float) -> list[str]:
+        """ISO2s whose world-data bbox contains the point, most-specific first.
+
+        Used to offer a dataset download for open-sea points that may actually sit
+        inside a not-yet-installed country. ``[]`` when the resolver can't provide it.
+        """
+        fn = getattr(self._world_resolver, "country_bbox_candidates", None)
+        if fn is None:
+            return []
+        try:
+            return list(fn(lat, lon))
+        except Exception:
+            return []
+
     def lookup_many_lons_lats(self, lons: object, lats: object) -> list[dict[str, Any]]:
         """Resolve a batch of lon/lat sequences and return lookup envelopes."""
         try:

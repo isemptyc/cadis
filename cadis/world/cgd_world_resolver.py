@@ -45,6 +45,19 @@ class CGDWorldResolver:
         hit = self._reader.lookup(lon, lat)
         return self._world_context_from_hit(hit, resolved_at=datetime.now(timezone.utc).isoformat())
 
+    def country_bbox_candidates(self, lat: float, lon: float) -> list[str]:
+        """Supported-country ISO2s whose CGD bbox contains the point (most-specific first).
+
+        Returns ``[]`` on backends that don't expose it (e.g. the native kernel).
+        """
+        fn = getattr(self._reader, "country_bbox_candidates", None)
+        if fn is None:
+            return []
+        try:
+            return list(fn(lon, lat))
+        except Exception:
+            return []
+
     def resolve_many_lons_lats(self, lons: object, lats: object) -> list[dict[str, Any]]:
         """Resolve a batch of lon/lat sequences, preserving input order."""
         resolved_at = datetime.now(timezone.utc).isoformat()
