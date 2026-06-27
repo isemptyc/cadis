@@ -158,24 +158,6 @@ class CadisManager:
             return resolve_cache_dir()
         return Path(cache_dir).expanduser()
 
-    def bootstrap_waterbody(
-        self,
-        *,
-        cache_dir: str | Path | None = None,
-        force_reinstall: bool = False,
-    ) -> dict[str, Any]:
-        from .cdn.bootstrap import install_global_dataset
-        cache_root = self._resolve_cache_root(cache_dir)
-        result = install_global_dataset(
-            dataset_id="waterbody.global",
-            cache_root=cache_root,
-            force_reinstall=force_reinstall,
-        )
-        dataset_dir = Path(result["dataset_dir"])
-        with self._lock:
-            self._waterbody_index = WaterbodyIndex(dataset_dir)
-        return result
-
     def get_waterbody_index(self) -> WaterbodyIndex | None:
         # The water body dataset is pinned: served from the version bundled in the
         # package (like the CGD world classifier), with no cache lookup or fallback.

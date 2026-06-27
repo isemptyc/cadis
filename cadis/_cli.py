@@ -29,7 +29,6 @@ def _build_parser() -> argparse.ArgumentParser:
 
     prepare_parser = subparsers.add_parser("prepare")
     prepare_parser.add_argument("--iso2")
-    prepare_parser.add_argument("--waterbody", action="store_true", default=False)
     prepare_parser.add_argument("--dataset-version")
     prepare_parser.add_argument("--output-dir")
     return parser
@@ -459,24 +458,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.command == "prepare":
-        if getattr(args, "waterbody", False):
-            from .cdn.bootstrap import install_global_dataset
-            progress, finish_progress = _render_download_progress()
-            try:
-                result = install_global_dataset(
-                    dataset_id="waterbody.global",
-                    cache_root=args.output_dir or str(resolve_cache_dir()),
-                    download_progress=progress,
-                )
-            finally:
-                finish_progress()
-            dataset_dir = result.get("dataset_dir", "")
-            cached = result.get("used_cached_dataset", False)
-            print(f"Waterbody dataset {'already installed' if cached else 'installed'}: {dataset_dir}")
-            return 0
-
         if not getattr(args, "iso2", None):
-            print("prepare requires --iso2 <code> or --waterbody")
+            print("prepare requires --iso2 <code>")
             return 1
 
         progress, finish_progress = _render_download_progress()

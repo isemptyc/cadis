@@ -18,7 +18,6 @@ from typing import Any, Callable, Iterable
 
 from ._cache import resolve_cache_dir
 from ._country_names import country_name_for_iso2
-from ._errors import normalize_reason
 from ._manager import get_manager
 from .types import (
     BootstrapResponse,
@@ -1858,24 +1857,6 @@ def reinstall(
         update_to_latest=update_to_latest,
         download_progress=download_progress,
     )
-
-
-def bootstrap_waterbody(
-    *,
-    cache_dir: str | Path | None = None,
-    force_reinstall: bool = False,
-) -> dict[str, Any]:
-    """Download and install the global waterbody dataset."""
-    manager = get_manager(cache_dir=cache_dir)
-    try:
-        return manager.bootstrap_waterbody(cache_dir=cache_dir, force_reinstall=force_reinstall)
-    except Exception as exc:
-        return {
-            "engine": "cadis",
-            "version": VERSION,
-            "bootstrap_status": "failed",
-            "error": normalize_reason(exc),
-        }
 
 
 def info(
