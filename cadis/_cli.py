@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
+import sys
 from typing import Any, Callable, Sequence
 
 from . import bootstrap as api_bootstrap
@@ -427,9 +429,29 @@ def _print_lookup_human(payload: dict[str, Any], *, lat: float, lon: float) -> i
     return 0
 
 
+_LOOKUP_FLAGS = {"--json", "-h", "--help"}
+
+
+def _normalize_lookup_argv(argv: list[str]) -> list[str]:
+    """Let `lookup` accept coordinates pasted as 'lat, lon' or 'lat,lon'.
+
+    Splits the (non-flag) coordinate tokens on commas/whitespace so a trailing or
+    embedded comma — common when copy-pasting a coordinate pair — parses cleanly.
+    Stripping the comma also lets argparse treat a negative value as a number
+    rather than an unknown option. Leaves non-lookup invocations untouched.
+    """
+    if not argv or argv[0] != "lookup":
+        return argv
+    flags = [tok for tok in argv[1:] if tok in _LOOKUP_FLAGS]
+    coord_tokens = [tok for tok in argv[1:] if tok not in _LOOKUP_FLAGS]
+    parts = [p for p in re.split(r"[,\s]+", " ".join(coord_tokens).strip()) if p]
+    return [argv[0]] + parts + flags
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
-    args = parser.parse_args(argv)
+    argv = list(sys.argv[1:] if argv is None else argv)
+    args = parser.parse_args(_normalize_lookup_argv(argv))
 
     if args.command == "info":
         payload = api_info()
