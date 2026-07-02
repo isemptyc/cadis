@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cadis"
-version = "0.10.4"
+version = "0.10.5"
 description = "Lat/Lon to administrative hierarchy lookup with managed datasets."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -33,7 +33,7 @@ include = [
 ]
 
 [tool.setuptools.package-data]
-"cadis.world" = ["data/*.cgd", "data/*.md"]
+"cadis.world" = ["data/*.cgd", "data/*.md", "data/*.json"]
 "cadis.waterbody" = ["data/*.ffsf", "data/*.json"]
 
 [tool.pytest.ini_options]
