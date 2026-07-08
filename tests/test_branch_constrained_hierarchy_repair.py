@@ -25,6 +25,17 @@ def _pipeline(index: HierarchyBranchIndex) -> CadisLookupPipeline:
     return pipeline
 
 
+def _geometry_index(*metas: dict) -> SimpleNamespace:
+    return SimpleNamespace(
+        feature_meta_by_index=list(metas),
+        feature_id_to_index={
+            meta["feature_id"]: idx
+            for idx, meta in enumerate(metas)
+            if isinstance(meta.get("feature_id"), str)
+        },
+    )
+
+
 def _lazy_pipeline(tmp_path: Path, *, hierarchy_required: bool, repair_required: bool) -> CadisLookupPipeline:
     pipeline = CadisLookupPipeline.__new__(CadisLookupPipeline)
     pipeline.dataset_dir = tmp_path
@@ -137,6 +148,39 @@ def test_repair_uses_parent_from_polygon_branch_path():
     }
 
 
+def test_hierarchy_parent_public_node_is_enriched_from_prefixed_geometry_alias():
+    index = _index(
+        [
+            HierarchyBranchNode("r6", 6, "Faro", None, None),
+            HierarchyBranchNode("r8", 8, "Lagoa e Carvoeiro", "r6", None),
+        ]
+    )
+    pipeline = _pipeline(index)
+    pipeline.geometry_index = _geometry_index(
+        {
+            "feature_id": "pt_r6",
+            "level": 6,
+            "name": "Faro",
+            "names": {"en": "Faro", "pt": "Faro"},
+        }
+    )
+
+    result = pipeline._hierarchy_provider(
+        {8: {"osm_id": "pt_r8", "name": "Lagoa e Carvoeiro"}},
+        {6},
+    )
+
+    assert result == {
+        6: {
+            "level": 6,
+            "name": "Faro",
+            "osm_id": "pt_r6",
+            "source": "admin_tree_id",
+            "names": {"en": "Faro", "pt": "Faro"},
+        }
+    }
+
+
 def test_hierarchy_index_loads_lazily_until_parent_level_is_missing(tmp_path, monkeypatch):
     calls = 0
     index = _index(
@@ -166,6 +210,32 @@ def test_hierarchy_index_loads_lazily_until_parent_level_is_missing(tmp_path, mo
         }
     }
     assert calls == 1
+
+
+def test_repair_public_node_is_enriched_from_prefixed_geometry_suffix(tmp_path, monkeypatch):
+    def load_repair(dataset_dir):
+        return {"Child": ("Faro", "r6")}, "loaded"
+
+    monkeypatch.setattr(pipeline_mod, "load_repair_anchor_map", load_repair)
+    pipeline = _lazy_pipeline(tmp_path, hierarchy_required=False, repair_required=True)
+    pipeline.geometry_index = _geometry_index(
+        {
+            "feature_id": "pt_r6",
+            "level": 6,
+            "name": "Faro",
+            "names": {"en": "Faro", "pt": "Faro"},
+        }
+    )
+
+    assert pipeline._repair_provider({7: {"name": "Child"}}, {6}) == {
+        6: {
+            "level": 6,
+            "name": "Faro",
+            "osm_id": "pt_r6",
+            "source": "semantic_anchor",
+            "names": {"en": "Faro", "pt": "Faro"},
+        }
+    }
 
 
 def test_repair_map_loads_lazily_until_parent_level_is_missing(tmp_path, monkeypatch):

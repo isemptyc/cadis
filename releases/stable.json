@@ -6,7 +6,7 @@
   "source_dataset_manifest_url": "https://dataset.cadis.dev/releases/dataset_manifest.json",
   "source_dataset_manifest_generated_at": "2026-07-02T15:58:01Z",
   "updated_at": "2026-07-02T16:13:05Z",
-  "cadis_version": "0.10.5",
+  "cadis_version": "0.10.6",
   "datasets": {
     "JP": "v1.0.3",
     "TW": "v1.0.5",

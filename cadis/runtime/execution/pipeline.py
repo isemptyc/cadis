@@ -109,6 +109,85 @@ class CadisLookupPipeline:
             )
         return self._repair_loader_reason_code
 
+    def _feature_meta_for_public_node(
+        self,
+        osm_id: object,
+        *,
+        branch_index: HierarchyBranchIndex | None = None,
+    ) -> dict[str, Any] | None:
+        if not isinstance(osm_id, str) or not osm_id:
+            return None
+
+        geometry_index = getattr(self, "geometry_index", None)
+        feature_id_to_index = getattr(geometry_index, "feature_id_to_index", None)
+        feature_meta_by_index = getattr(geometry_index, "feature_meta_by_index", None)
+        if not isinstance(feature_id_to_index, dict) or not isinstance(
+            feature_meta_by_index,
+            list,
+        ):
+            return None
+
+        candidates: list[str] = [osm_id]
+        if "_" in osm_id:
+            candidates.append(osm_id.split("_", 1)[1])
+
+        if branch_index is not None:
+            resolved = branch_index.resolve_id(osm_id)
+            if resolved is not None:
+                for alias, target in branch_index.id_aliases.items():
+                    if target == resolved:
+                        candidates.append(alias)
+
+        seen: set[str] = set()
+        for candidate in candidates:
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            feature_idx = feature_id_to_index.get(candidate)
+            if isinstance(feature_idx, int) and 0 <= feature_idx < len(
+                feature_meta_by_index
+            ):
+                meta = feature_meta_by_index[feature_idx]
+                if isinstance(meta, dict):
+                    return meta
+
+        suffix = f"_{osm_id}"
+        for feature_id, feature_idx in feature_id_to_index.items():
+            if not isinstance(feature_id, str) or not feature_id.endswith(suffix):
+                continue
+            if isinstance(feature_idx, int) and 0 <= feature_idx < len(
+                feature_meta_by_index
+            ):
+                meta = feature_meta_by_index[feature_idx]
+                if isinstance(meta, dict):
+                    return meta
+        return None
+
+    def _enrich_public_node_from_geometry(
+        self,
+        public_node: dict[str, Any],
+        *,
+        branch_index: HierarchyBranchIndex | None = None,
+    ) -> dict[str, Any]:
+        meta = self._feature_meta_for_public_node(
+            public_node.get("osm_id"),
+            branch_index=branch_index,
+        )
+        if meta is None:
+            return public_node
+
+        out = dict(public_node)
+        feature_id = meta.get("feature_id")
+        if isinstance(feature_id, str) and feature_id:
+            out["osm_id"] = feature_id
+        name = meta.get("name")
+        if isinstance(name, str) and name:
+            out["name"] = name
+        names = meta.get("names")
+        if isinstance(names, dict) and names:
+            out["names"] = names
+        return out
+
     @repair_loader_reason_code.setter
     def repair_loader_reason_code(self, value: str) -> None:
         self._repair_loader_reason_code = value
@@ -210,7 +289,12 @@ class CadisLookupPipeline:
                     compatible = False
                     break
             if compatible:
-                return {parent_level: _hierarchy_node_to_public(candidate, source="admin_tree_id")}
+                return {
+                    parent_level: self._enrich_public_node_from_geometry(
+                        _hierarchy_node_to_public(candidate, source="admin_tree_id"),
+                        branch_index=branch_index,
+                    )
+                }
 
         if evidence_paths:
             return {}
@@ -225,7 +309,12 @@ class CadisLookupPipeline:
                 continue
             for candidate in branch_index.path_to_root(child_node.id):
                 if candidate.level == parent_level:
-                    return {parent_level: _hierarchy_node_to_public(candidate, source="admin_tree_unique_name")}
+                    return {
+                        parent_level: self._enrich_public_node_from_geometry(
+                            _hierarchy_node_to_public(candidate, source="admin_tree_unique_name"),
+                            branch_index=branch_index,
+                        )
+                    }
         return {}
 
     def _repair_provider(self, evidence: dict[int, dict], missing_levels: set[int]) -> dict[int, dict]:
@@ -242,14 +331,13 @@ class CadisLookupPipeline:
             mapped = self.repair_anchor_map.get(name)
             if not mapped:
                 continue
-            return {
-                parent_level: {
-                    "level": parent_level,
-                    "name": mapped[0],
-                    "osm_id": mapped[1],
-                    "source": "semantic_anchor",
-                }
+            node = {
+                "level": parent_level,
+                "name": mapped[0],
+                "osm_id": mapped[1],
+                "source": "semantic_anchor",
             }
+            return {parent_level: self._enrich_public_node_from_geometry(node)}
         return {}
 
     def _build_offshore_result(self) -> dict[str, Any]:
