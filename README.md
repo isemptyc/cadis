@@ -113,8 +113,8 @@ Cadis does not interpret ISO codes as political statements or sovereignty declar
 
 | ISO2 | Name | Dataset ID | Package Size (tar.gz) | Unpacked Size | Release Date (UTC) |
 |:-----|:-----|:-----------|----------------------:|--------------:|-------------------:|
-| TW | Taiwan | tw.admin | 1.8 MB | 2.0 MB | 2026-04-05 |
-| JP | Japan | jp.admin | 20.4 MB | 21.4 MB | 2026-04-05 |
+| TW | Taiwan | tw.admin | 1.8 MB | 2.0 MB | 2026-07-08 |
+| JP | Japan | jp.admin | 20.4 MB | 21.3 MB | 2026-06-26 |
 | GB | United Kingdom | gb.admin | 4.5 MB | 4.9 MB | 2026-05-12 |
 | IE | Ireland | ie.admin | 1.5 MB | 3.1 MB | 2026-05-12 |
 | IT | Italy | it.admin | 22.9 MB | 26.0 MB | 2026-04-05 |
@@ -160,15 +160,15 @@ Cadis does not interpret ISO codes as political statements or sovereignty declar
 | CZ | Czech Republic | cz.admin | 9.4 MB | 12.2 MB | 2026-05-12 |
 | SG | Singapore | sg.admin | 0.01 MB | 0.02 MB | 2026-04-29 |
 | MY | Malaysia | my.admin | 0.3 MB | 0.5 MB | 2026-04-29 |
-| TH | Thailand | th.admin | 1.3 MB | 2.3 MB | 2026-04-29 |
+| TH | Thailand | th.admin | 1.5 MB | 2.6 MB | 2026-07-02 |
 | ID | Indonesia | id.admin | 6.9 MB | 10.4 MB | 2026-04-30 |
 | GR | Greece | gr.admin | 2.5 MB | 3.2 MB | 2026-05-10 |
 | TR | Turkey | tr.admin | 0.4 MB | 0.8 MB | 2026-05-12 |
 | BR | Brazil | br.admin | 4.4 MB | 6.5 MB | 2026-05-12 |
-| IN | India | in.admin | 2.7 MB | 5.4 MB | 2026-05-12 |
+| IN | India | in.admin | 2.8 MB | 5.7 MB | 2026-07-02 |
 | MX | Mexico | mx.admin | 1.6 MB | 2.6 MB | 2026-05-10 |
-| PH | Philippines | ph.admin | 2.2 MB | 3.5 MB | 2026-05-10 |
-| VN | Vietnam | vn.admin | 0.6 MB | 1.9 MB | 2026-05-10 |
+| PH | Philippines | ph.admin | 3.5 MB | 5.6 MB | 2026-07-02 |
+| VN | Vietnam | vn.admin | 0.7 MB | 2.2 MB | 2026-07-02 |
 | AR | Argentina | ar.admin | 0.6 MB | 1.6 MB | 2026-05-10 |
 | CL | Chile | cl.admin | 0.6 MB | 1.0 MB | 2026-05-11 |
 | CO | Colombia | co.admin | 1.0 MB | 2.6 MB | 2026-05-11 |
