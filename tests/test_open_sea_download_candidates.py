@@ -124,6 +124,57 @@ def test_hong_kong_batch_override_matches_single_lookup_and_country_precedence()
     assert "resolution_method" not in batch[1]
 
 
+def test_maldives_destination_envelope_recognizes_resort_and_lagoon_photos() -> None:
+    resolver = _real_world_resolver()
+
+    for lat, lon in [
+        (4.2850, 73.4270),   # Baros lagoon
+        (5.7260, 73.4150),   # Soneva Jani
+        (3.6170, 72.7240),   # Conrad Rangali
+        (-0.6930, 73.1550),  # Gan / Addu Atoll
+    ]:
+        out = resolver.resolve(lat, lon)
+        assert out["lookup_status"] == "ok"
+        assert out["resolution_method"] == "land_override"
+        assert out["country"] == {"iso2": "MV", "name": "Maldives"}
+        assert out["land_override"]["id"] == "photolens-curator:mv_maldives"
+        assert resolver.country_bbox_candidates(lat, lon)[0] == "MV"
+
+
+def test_maldives_override_preserves_existing_country_classification() -> None:
+    resolver = _real_world_resolver()
+
+    out = resolver.resolve(4.1755, 73.5093)  # Malé
+    assert out["lookup_status"] == "ok"
+    assert out.get("resolution_method") is None
+    assert out["country"] == {"iso2": "MV", "name": "Maldives"}
+
+
+def test_maldives_destination_envelope_excludes_outer_indian_ocean() -> None:
+    resolver = _real_world_resolver()
+
+    for lat, lon in [(4.0, 72.0), (4.0, 74.2)]:
+        out = resolver.resolve(lat, lon)
+        assert out["lookup_status"] == "ok"
+        assert out["resolution_method"] == "open_sea"
+
+
+def test_maldives_batch_override_matches_single_lookup_and_country_precedence() -> None:
+    resolver = _real_world_resolver()
+    lons = [73.4270, 73.5093]
+    lats = [4.2850, 4.1755]
+
+    batch = resolver.resolve_many_lons_lats(lons, lats)
+    single = [resolver.resolve(lat, lon) for lon, lat in zip(lons, lats)]
+    for item in batch + single:
+        item.pop("resolved_at", None)
+    assert batch == single
+    assert batch[0]["country"]["iso2"] == "MV"
+    assert batch[0]["resolution_method"] == "land_override"
+    assert batch[1]["country"]["iso2"] == "MV"
+    assert "resolution_method" not in batch[1]
+
+
 # --------------------------------------------------------------------------- #
 # _api candidate filtering — supported, not installed, allowlisted
 # --------------------------------------------------------------------------- #

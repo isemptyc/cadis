@@ -188,6 +188,31 @@
           ]
         ]
       }
+    },
+    {
+      "id": "photolens-curator:mv_maldives",
+      "name": "Maldives",
+      "country": {
+        "iso2": "MV",
+        "name": "Maldives"
+      },
+      "source": "PhotoLens Curator landmark_geometry/MV/mv_maldives.geojson, reviewed 2026-08-13",
+      "bbox": [72.152322, -1.125975, 74.107247, 7.511358],
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [72.701458, 7.467778],
+            [72.152322, 6.245882],
+            [72.701458, -0.97216],
+            [73.294525, -1.125975],
+            [73.909558, -0.31289],
+            [74.107247, 5.436955],
+            [73.31649, 7.511358],
+            [72.701458, 7.467778]
+          ]
+        ]
+      }
     }
   ]
 }
