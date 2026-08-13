@@ -45,6 +45,35 @@ def test_cgd_country_bbox_candidates_includes_brazil() -> None:
     assert reader.country_bbox_candidates(-150.0, 0.0) == []
 
 
+def _real_world_resolver():
+    for name in [n for n in list(sys.modules) if n == "cadis.world" or n.startswith("cadis.world.")]:
+        sys.modules.pop(name, None)
+    resolver_module = importlib.import_module("cadis.world.cgd_world_resolver")
+    cgd_path = Path(resolver_module.__file__).parent / "data" / "ne.global.v0.1.0.cgd"
+    return resolver_module.CGDWorldResolver(cgd_path=cgd_path)
+
+
+def test_macao_photo_recognition_override_covers_cotai_and_airport() -> None:
+    resolver = _real_world_resolver()
+
+    for lat, lon in [(22.1450, 113.5650), (22.1496, 113.5915)]:
+        out = resolver.resolve(lat, lon)
+        assert out["lookup_status"] == "ok"
+        assert out["resolution_method"] == "land_override"
+        assert out["country"] == {"iso2": "MO", "name": "Macao"}
+        assert out["land_override"]["id"] == "photolens-curator:mo_macao"
+        assert resolver.country_bbox_candidates(lat, lon)[0] == "MO"
+
+
+def test_macao_photo_recognition_override_excludes_adjacent_water() -> None:
+    resolver = _real_world_resolver()
+
+    out = resolver.resolve(22.15, 113.61)
+    assert out["lookup_status"] == "ok"
+    assert out["resolution_method"] == "open_sea"
+    assert out["world_result"] == {"type": "open_sea", "name": "South China Sea"}
+
+
 # --------------------------------------------------------------------------- #
 # _api candidate filtering — supported, not installed, allowlisted
 # --------------------------------------------------------------------------- #
