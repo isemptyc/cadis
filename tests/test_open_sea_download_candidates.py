@@ -175,6 +175,57 @@ def test_maldives_batch_override_matches_single_lookup_and_country_precedence() 
     assert "resolution_method" not in batch[1]
 
 
+def test_jeju_destination_envelope_repairs_island_and_coastal_gaps() -> None:
+    resolver = _real_world_resolver()
+
+    for lat, lon in [
+        (33.4583, 126.9425),  # Seongsan Ilchulbong
+        (33.5043, 126.9526),  # Udo
+        (33.1163, 126.2670),  # Marado
+        (33.1600, 126.5000),  # southern coastal GPS drift
+    ]:
+        out = resolver.resolve(lat, lon)
+        assert out["lookup_status"] == "ok"
+        assert out["resolution_method"] == "land_override"
+        assert out["country"] == {"iso2": "KR", "name": "South Korea"}
+        assert out["land_override"]["id"] == "photolens-curator:kr_jeju_island"
+        assert resolver.country_bbox_candidates(lat, lon)[0] == "KR"
+
+
+def test_jeju_override_preserves_existing_south_korea_classification() -> None:
+    resolver = _real_world_resolver()
+
+    out = resolver.resolve(33.5104, 126.4914)  # Jeju Airport
+    assert out["lookup_status"] == "ok"
+    assert out.get("resolution_method") is None
+    assert out["country"] == {"iso2": "KR", "name": "South Korea"}
+
+
+def test_jeju_destination_envelope_excludes_surrounding_outer_sea() -> None:
+    resolver = _real_world_resolver()
+
+    for lat, lon in [(33.70, 126.55), (33.00, 126.55), (33.35, 127.10)]:
+        out = resolver.resolve(lat, lon)
+        assert out["lookup_status"] == "ok"
+        assert out["resolution_method"] == "open_sea"
+
+
+def test_jeju_batch_override_matches_single_lookup_and_country_precedence() -> None:
+    resolver = _real_world_resolver()
+    lons = [126.9425, 126.4914]
+    lats = [33.4583, 33.5104]
+
+    batch = resolver.resolve_many_lons_lats(lons, lats)
+    single = [resolver.resolve(lat, lon) for lon, lat in zip(lons, lats)]
+    for item in batch + single:
+        item.pop("resolved_at", None)
+    assert batch == single
+    assert batch[0]["country"]["iso2"] == "KR"
+    assert batch[0]["resolution_method"] == "land_override"
+    assert batch[1]["country"]["iso2"] == "KR"
+    assert "resolution_method" not in batch[1]
+
+
 # --------------------------------------------------------------------------- #
 # _api candidate filtering — supported, not installed, allowlisted
 # --------------------------------------------------------------------------- #

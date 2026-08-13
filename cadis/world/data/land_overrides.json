@@ -213,6 +213,31 @@
           ]
         ]
       }
+    },
+    {
+      "id": "photolens-curator:kr_jeju_island",
+      "name": "Jeju Island",
+      "country": {
+        "iso2": "KR",
+        "name": "South Korea"
+      },
+      "source": "PhotoLens Curator landmark_geometry/KR/kr_jeju_island.geojson, reviewed 2026-08-13",
+      "bbox": [126.048479, 33.086943, 127.047241, 33.618675],
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [127.003321, 33.557418],
+            [126.685477, 33.618675],
+            [126.254405, 33.53399],
+            [126.048479, 33.343718],
+            [126.119867, 33.148431],
+            [126.27412, 33.086943],
+            [127.047241, 33.319057],
+            [127.003321, 33.557418]
+          ]
+        ]
+      }
     }
   ]
 }
