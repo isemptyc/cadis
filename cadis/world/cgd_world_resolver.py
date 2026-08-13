@@ -44,14 +44,20 @@ class CGDWorldResolver:
 
     def resolve(self, lat: float, lon: float) -> dict[str, Any]:
         """Resolve point to country or world terminal state envelope."""
+        resolved_at = datetime.now(timezone.utc).isoformat()
+        hit = self._reader.lookup(lon, lat)
+        hit_context = self._world_context_from_hit(hit, resolved_at=resolved_at)
+        # Curated recognition polygons repair coastal gaps; they must not
+        # replace a sovereign-country result that CGD already resolved.
+        if isinstance(hit_context.get("country"), dict):
+            return hit_context
         override = self._land_overrides.lookup(lat, lon)
         if override is not None:
             return self._world_context_from_override(
                 override,
-                resolved_at=datetime.now(timezone.utc).isoformat(),
+                resolved_at=resolved_at,
             )
-        hit = self._reader.lookup(lon, lat)
-        return self._world_context_from_hit(hit, resolved_at=datetime.now(timezone.utc).isoformat())
+        return hit_context
 
     def country_bbox_candidates(self, lat: float, lon: float) -> list[str]:
         """Supported-country ISO2s whose CGD bbox contains the point (most-specific first).
@@ -79,30 +85,26 @@ class CGDWorldResolver:
         if len(lon_values) != len(lat_values):
             raise ValueError("lons and lats must have the same length")
 
-        override_contexts: dict[int, dict[str, Any]] = {}
-        remaining_indices: list[int] = []
-        remaining_lons: list[float] = []
-        remaining_lats: list[float] = []
-        for index, (lon, lat) in enumerate(zip(lon_values, lat_values)):
+        if hasattr(self._reader, "lookup_many_lons_lats"):
+            hits = self._reader.lookup_many_lons_lats(lon_values, lat_values)
+        else:
+            hits = [
+                self._reader.lookup(float(lon), float(lat))
+                for lon, lat in zip(lon_values, lat_values)
+            ]
+
+        out: list[dict[str, Any]] = []
+        for lon, lat, hit in zip(lon_values, lat_values, hits):
+            hit_context = self._world_context_from_hit(hit, resolved_at=resolved_at)
+            if isinstance(hit_context.get("country"), dict):
+                out.append(hit_context)
+                continue
             override = self._land_overrides.lookup(float(lat), float(lon))
             if override is not None:
-                override_contexts[index] = self._world_context_from_override(override, resolved_at=resolved_at)
+                out.append(self._world_context_from_override(override, resolved_at=resolved_at))
             else:
-                remaining_indices.append(index)
-                remaining_lons.append(float(lon))
-                remaining_lats.append(float(lat))
-
-        if hasattr(self._reader, "lookup_many_lons_lats"):
-            hits = self._reader.lookup_many_lons_lats(remaining_lons, remaining_lats)
-        else:
-            hits = [self._reader.lookup(lon, lat) for lon, lat in zip(remaining_lons, remaining_lats)]
-
-        out: list[dict[str, Any] | None] = [None] * len(lon_values)
-        for index, context in override_contexts.items():
-            out[index] = context
-        for index, hit in zip(remaining_indices, hits):
-            out[index] = self._world_context_from_hit(hit, resolved_at=resolved_at)
-        return [item for item in out if item is not None]
+                out.append(hit_context)
+        return out
 
     def _world_context_from_override(self, override: LandOverrideHit, *, resolved_at: str) -> dict[str, Any]:
         return {

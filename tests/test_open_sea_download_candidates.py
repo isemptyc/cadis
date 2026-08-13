@@ -74,6 +74,56 @@ def test_macao_photo_recognition_override_excludes_adjacent_water() -> None:
     assert out["world_result"] == {"type": "open_sea", "name": "South China Sea"}
 
 
+def test_hong_kong_photo_recognition_override_repairs_cgd_coastal_gaps() -> None:
+    resolver = _real_world_resolver()
+
+    for lat, lon in [
+        (22.2819, 114.1589),  # Central
+        (22.3015, 114.1567),  # West Kowloon
+        (22.3129, 114.0413),  # Disneyland
+        (22.3080, 113.9185),  # airport terminal
+        (22.3060, 114.2580),  # Tseung Kwan O
+    ]:
+        out = resolver.resolve(lat, lon)
+        assert out["lookup_status"] == "ok"
+        assert out["resolution_method"] == "land_override"
+        assert out["country"] == {"iso2": "HK", "name": "Hong Kong"}
+        assert out["land_override"]["id"] == "photolens-curator:hk_hong_kong"
+
+
+def test_hong_kong_override_does_not_replace_existing_china_classification() -> None:
+    resolver = _real_world_resolver()
+
+    out = resolver.resolve(22.5375, 114.1178)  # Luohu, Shenzhen side
+    assert out["lookup_status"] == "ok"
+    assert out.get("resolution_method") is None
+    assert out["country"] == {"iso2": "CN", "name": "China"}
+
+
+def test_hong_kong_override_excludes_outer_open_water() -> None:
+    resolver = _real_world_resolver()
+
+    out = resolver.resolve(22.10, 114.20)
+    assert out["lookup_status"] == "ok"
+    assert out["resolution_method"] == "open_sea"
+
+
+def test_hong_kong_batch_override_matches_single_lookup_and_country_precedence() -> None:
+    resolver = _real_world_resolver()
+    lons = [114.1589, 114.1178]
+    lats = [22.2819, 22.5375]
+
+    batch = resolver.resolve_many_lons_lats(lons, lats)
+    single = [resolver.resolve(lat, lon) for lon, lat in zip(lons, lats)]
+    for item in batch + single:
+        item.pop("resolved_at", None)
+    assert batch == single
+    assert batch[0]["country"]["iso2"] == "HK"
+    assert batch[0]["resolution_method"] == "land_override"
+    assert batch[1]["country"]["iso2"] == "CN"
+    assert "resolution_method" not in batch[1]
+
+
 # --------------------------------------------------------------------------- #
 # _api candidate filtering — supported, not installed, allowlisted
 # --------------------------------------------------------------------------- #
