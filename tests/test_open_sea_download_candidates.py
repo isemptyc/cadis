@@ -226,6 +226,58 @@ def test_jeju_batch_override_matches_single_lookup_and_country_precedence() -> N
     assert "resolution_method" not in batch[1]
 
 
+def test_palau_destination_envelope_repairs_koror_and_southern_islands() -> None:
+    resolver = _real_world_resolver()
+
+    for lat, lon in [
+        (7.3420, 134.4790),  # Koror
+        (7.1610, 134.3760),  # Jellyfish Lake, Rock Islands
+        (7.1350, 134.2210),  # Blue Corner
+        (7.0000, 134.2500),  # Peleliu
+        (6.9100, 134.1350),  # Angaur
+    ]:
+        out = resolver.resolve(lat, lon)
+        assert out["lookup_status"] == "ok"
+        assert out["resolution_method"] == "land_override"
+        assert out["country"] == {"iso2": "PW", "name": "Palau"}
+        assert out["land_override"]["id"] == "photolens-curator:pw_palau"
+        assert resolver.country_bbox_candidates(lat, lon)[0] == "PW"
+
+
+def test_palau_override_preserves_existing_palau_classification() -> None:
+    resolver = _real_world_resolver()
+
+    out = resolver.resolve(7.5000, 134.6240)  # Ngerulmud
+    assert out["lookup_status"] == "ok"
+    assert out.get("resolution_method") is None
+    assert out["country"] == {"iso2": "PW", "name": "Palau"}
+
+
+def test_palau_destination_envelope_excludes_surrounding_outer_sea() -> None:
+    resolver = _real_world_resolver()
+
+    for lat, lon in [(8.70, 134.60), (6.60, 134.30), (7.50, 135.10), (7.40, 133.80), (6.80, 134.00)]:
+        out = resolver.resolve(lat, lon)
+        assert out["lookup_status"] == "ok"
+        assert out["resolution_method"] == "open_sea"
+
+
+def test_palau_batch_override_matches_single_lookup_and_country_precedence() -> None:
+    resolver = _real_world_resolver()
+    lons = [134.4790, 134.6240]
+    lats = [7.3420, 7.5000]
+
+    batch = resolver.resolve_many_lons_lats(lons, lats)
+    single = [resolver.resolve(lat, lon) for lon, lat in zip(lons, lats)]
+    for item in batch + single:
+        item.pop("resolved_at", None)
+    assert batch == single
+    assert batch[0]["country"]["iso2"] == "PW"
+    assert batch[0]["resolution_method"] == "land_override"
+    assert batch[1]["country"]["iso2"] == "PW"
+    assert "resolution_method" not in batch[1]
+
+
 # --------------------------------------------------------------------------- #
 # _api candidate filtering — supported, not installed, allowlisted
 # --------------------------------------------------------------------------- #

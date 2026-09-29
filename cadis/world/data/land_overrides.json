@@ -238,6 +238,30 @@
           ]
         ]
       }
+    },
+    {
+      "id": "photolens-curator:pw_palau",
+      "name": "Palau",
+      "country": {
+        "iso2": "PW",
+        "name": "Palau"
+      },
+      "source": "PhotoLens Curator landmark_geometry/PW/pw_palau.geojson, reviewed 2026-09-29",
+      "bbox": [134.029153, 6.76826, 134.888782, 8.526677],
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [134.614077, 8.526677],
+            [134.029153, 7.539582],
+            [134.078527, 6.76826],
+            [134.704757, 7.129521],
+            [134.857158, 7.509565],
+            [134.888782, 8.120414],
+            [134.614077, 8.526677]
+          ]
+        ]
+      }
     }
   ]
 }
