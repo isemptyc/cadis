@@ -16842,6 +16842,25 @@
     }
   },
   {
+    "feature_id": "osm_r19292450",
+    "name": "Tagus River",
+    "native": "Rio Tejo",
+    "names": {
+      "en": "Tagus River",
+      "pt": "Rio Tejo",
+      "es": "Río Tajo",
+      "zh-Hant": "太加斯河",
+      "zh-Hant-TW": "太加斯河"
+    },
+    "type": "river",
+    "bbox": {
+      "min_lon": -9.3240023,
+      "min_lat": 38.6210102,
+      "max_lon": -8.2308783,
+      "max_lat": 39.475873
+    }
+  },
+  {
     "feature_id": "ne_marine_1159115057",
     "name": "Atlantic Ocean",
     "native": null,
@@ -16875,10 +16894,10 @@
     },
     "type": "sea",
     "bbox": {
-      "min_lon": -81.52062577993891,
-      "min_lat": 0.0222728540001782,
-      "max_lon": 6.557047153356137,
-      "max_lat": 68.43716665310187
+      "min_lon": -81.52062225341797,
+      "min_lat": 0.022272853180766106,
+      "max_lon": 6.557047367095947,
+      "max_lat": 68.43716430664062
     }
   },
   {

@@ -10,7 +10,7 @@ from pathlib import Path
 # Version of the water body dataset bundled under cadis/waterbody/data/. Embedded
 # in the wheel (like the CGD world classifier) so named-water-body resolution works
 # out of the box with no download. A newer copy installed in the cache overrides it.
-BUNDLED_WATERBODY_VERSION = "v1.0.5"
+BUNDLED_WATERBODY_VERSION = "v1.0.6"
 
 
 def _quantize(value: float, min_value: float, span: float) -> int:

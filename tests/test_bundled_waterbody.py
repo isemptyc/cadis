@@ -27,7 +27,7 @@ def test_waterbody_dataset_is_bundled_in_package() -> None:
     assert data_dir is not None
     assert (data_dir / "waterbody.ffsf").is_file()
     assert (data_dir / "waterbody_meta.json").is_file()
-    assert wb.BUNDLED_WATERBODY_VERSION == "v1.0.5"
+    assert wb.BUNDLED_WATERBODY_VERSION == "v1.0.6"
 
 
 def test_from_bundled_resolves_lake_taupo() -> None:
@@ -80,3 +80,53 @@ def test_manager_ignores_cache_copy_dataset_is_pinned(tmp_path: Path) -> None:
     manager = CadisManager(default_cache_dir=tmp_path)
     # Pinned bundled dataset wins; the cache copy ("Cache Lake") is never used.
     assert manager.get_waterbody_index().lookup(TAUPO_LAT, TAUPO_LON) == "Lake Taupo"
+
+
+def test_tagus_estuary_and_nearby_lisbon_land() -> None:
+    index = _real_waterbody_module().WaterbodyIndex.from_bundled()
+    assert index is not None
+
+    estuary = index.lookup_record(38.766572, -9.075)
+    assert estuary is not None
+    assert estuary["name"] == "Tagus River"
+    assert estuary["names"]["zh-Hant-TW"] == "太加斯河"
+    assert index.lookup(39.23792115, -8.663492957433157) == "Tagus River"
+    assert index.lookup(38.7665722222222, -9.09865555555556) is None
+    assert index.lookup(38.7, -9.5) == "Atlantic Ocean"
+
+
+def test_lisbon_land_override_leaves_tagus_estuary_as_water() -> None:
+    from cadis.world.cgd_world_resolver import CGDWorldResolver
+
+    cgd_path = Path(__file__).resolve().parents[1] / "cadis/world/data/ne.global.v0.1.0.cgd"
+    resolver = CGDWorldResolver(cgd_path=cgd_path)
+
+    photo = resolver.resolve(38.7665722222222, -9.09865555555556)
+    assert photo["country"]["iso2"] == "PT"
+    assert photo["resolution_method"] == "land_override"
+
+    estuary = resolver.resolve(38.766572, -9.075)
+    assert estuary["world_result"]["type"] == "open_sea"
+
+
+def test_belem_shoreline_can_match_portugal_and_tagus() -> None:
+    from cadis.world.cgd_world_resolver import CGDWorldResolver
+
+    cgd_path = Path(__file__).resolve().parents[1] / "cadis/world/data/ne.global.v0.1.0.cgd"
+    resolver = CGDWorldResolver(cgd_path=cgd_path)
+    index = _real_waterbody_module().WaterbodyIndex.from_bundled()
+    assert index is not None
+
+    photo = (38.6933694444444, -9.20629444444444)
+    assert resolver.resolve(*photo)["country"]["iso2"] == "PT"
+    waterbody = index.lookup_record(*photo)
+    assert waterbody is not None
+    assert waterbody["names"]["zh-Hant-TW"] == "太加斯河"
+
+    # The river side stays open water, while the inland side leaves Tagus coverage.
+    river = (38.6932694444444, photo[1])
+    inland = (38.6934694444444, photo[1])
+    assert resolver.resolve(*river)["world_result"]["type"] == "open_sea"
+    assert index.lookup(*river) == "Tagus River"
+    assert resolver.resolve(*inland)["country"]["iso2"] == "PT"
+    assert index.lookup(*inland) != "Tagus River"
