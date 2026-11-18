@@ -130,3 +130,18 @@ def test_belem_shoreline_can_match_portugal_and_tagus() -> None:
     assert index.lookup(*river) == "Tagus River"
     assert resolver.resolve(*inland)["country"]["iso2"] == "PT"
     assert index.lookup(*inland) != "Tagus River"
+
+
+def test_mainland_spain_coastal_gaps_leave_open_water_and_gibraltar() -> None:
+    from cadis.world.cgd_world_resolver import CGDWorldResolver
+
+    cgd_path = Path(__file__).resolve().parents[1] / "cadis/world/data/ne.global.v0.1.0.cgd"
+    resolver = CGDWorldResolver(cgd_path=cgd_path)
+
+    for land in ((39.4725, -0.3236), (36.7174, -4.41), (43.4613, -3.8047)):
+        result = resolver.resolve(*land)
+        assert result["country"]["iso2"] == "ES"
+        assert result["resolution_method"] == "land_override"
+
+    assert resolver.resolve(39.4725, -0.30)["world_result"]["type"] == "open_sea"
+    assert resolver.resolve(36.12677731661892, -5.3456406617257555)["country"]["iso2"] == "GI"
