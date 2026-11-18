@@ -21,6 +21,7 @@ from ._country_names import country_name_for_iso2
 from ._manager import get_manager
 from .types import (
     BootstrapResponse,
+    DatasetState,
     ExecutionOutcome,
     InfoResponse,
     LookupManyResponseItem,
@@ -953,12 +954,8 @@ def lookup(
                 "iso2": iso2,
             }
         else:
-            return _open_sea_output(
-                world_state=world_state,
-                waterbody=_lookup_waterbody(manager, lat=float(lat), lon=float(lon)),
-                download_candidates=_open_sea_download_candidates(
-                    manager, lat=float(lat), lon=float(lon), cache_dir=cache_dir
-                ),
+            return _open_sea_lookup_output(
+                manager=manager, world_state=world_state, lat=float(lat), lon=float(lon), cache_dir=cache_dir,
             )
     if iso2 is None:
         return _failed_output(state={"world": world_state})
@@ -1035,6 +1032,21 @@ def _open_sea_download_candidates(
     return out
 
 
+def _open_sea_lookup_output(
+    *,
+    manager: Any,
+    world_state: WorldState,
+    lat: float,
+    lon: float,
+    cache_dir: str | Path | None,
+) -> LookupResponse:
+    return _open_sea_output(
+        world_state=world_state,
+        waterbody=_lookup_waterbody(manager, lat=lat, lon=lon),
+        download_candidates=_open_sea_download_candidates(manager, lat=lat, lon=lon, cache_dir=cache_dir),
+    )
+
+
 def _open_sea_output(
     *,
     world_state: WorldState,
@@ -1091,9 +1103,24 @@ def _lookup_country(
             state={"world": world_state, "dataset": runtime_handle.dataset_state},
         )
 
+    return _country_lookup_output(
+        manager=manager, world_state=world_state, dataset_state=runtime_handle.dataset_state,
+        lat=lat, lon=lon, admin_result=admin_result,
+    )
+
+
+def _country_lookup_output(
+    *,
+    manager: Any,
+    world_state: WorldState,
+    dataset_state: DatasetState,
+    lat: float,
+    lon: float,
+    admin_result: object,
+) -> LookupResponse:
     if not isinstance(admin_result, dict):
         return _failed_output(
-            state={"world": world_state, "dataset": runtime_handle.dataset_state},
+            state={"world": world_state, "dataset": dataset_state},
         )
 
     runtime_status = str(admin_result.get("lookup_status", "failed"))
@@ -1115,12 +1142,12 @@ def _lookup_country(
             lookup_status=runtime_status,
             state={
                 "world": world_state,
-                "dataset": runtime_handle.dataset_state,
+                "dataset": dataset_state,
             },
         ),
         "state": {
             "world": world_state,
-            "dataset": runtime_handle.dataset_state,
+            "dataset": dataset_state,
         },
         "result": result_payload,
     }
@@ -1195,31 +1222,10 @@ def _lookup_country_rows(
         return output
 
     def build_output(row: _ResolvedLookupRecord, admin_result: object) -> LookupResponse:
-        if not isinstance(admin_result, dict):
-            return _failed_output(
-                state={"world": row.world_state, "dataset": runtime_handle.dataset_state},
-            )
-
-        runtime_status = str(admin_result.get("lookup_status", "failed"))
-        if runtime_status not in {"ok", "partial", "failed"}:
-            runtime_status = "failed"
-
-        return {
-            "engine": "cadis",
-            "version": VERSION,
-            "execution": _execution_outcome(
-                lookup_status=runtime_status,
-                state={
-                    "world": row.world_state,
-                    "dataset": runtime_handle.dataset_state,
-                },
-            ),
-            "state": {
-                "world": row.world_state,
-                "dataset": runtime_handle.dataset_state,
-            },
-            "result": admin_result.get("result"),
-        }
+        return _country_lookup_output(
+            manager=manager, world_state=row.world_state, dataset_state=runtime_handle.dataset_state,
+            lat=row.lat, lon=row.lon, admin_result=admin_result,
+        )
 
     use_runtime_batch = _use_country_runtime_batch(len(rows))
     if diagnostics is not None:
@@ -1728,9 +1734,13 @@ def _lookup_many_impl(
             diagnostics.inc("offshore_resolved_rows", len(offshore_resolved))
         for row in open_sea_rows:
             if row.index not in offshore_resolved_indexes:
-                results[row.index] = _lookup_many_output(row.id, _failed_output(state={"world": row.world_state}))
-                if diagnostics is not None:
-                    diagnostics.inc("terminal_non_country_rows")
+                results[row.index] = _lookup_many_output(
+                    row.id,
+                    _open_sea_lookup_output(
+                        manager=manager, world_state=row.world_state,
+                        lat=row.lat, lon=row.lon, cache_dir=cache_dir,
+                    ),
+                )
         if diagnostics is not None:
             diagnostics.add_time("offshore_candidate_pass", time.perf_counter() - offshore_start)
             diagnostics.add_memory_sample(
