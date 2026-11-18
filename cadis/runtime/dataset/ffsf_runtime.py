@@ -409,55 +409,40 @@ class FFSFSpatialIndexV2:
         return allowlist
 
 
+def country_scope_feature_indices(metadata: list[dict]) -> list[int]:
+    """Select the same administrative coverage for geometry and candidate bounds."""
+    levels = [
+        (i, row["level"], row.get("country_scope_flag") is True)
+        for i, row in enumerate(metadata)
+        if isinstance(row, dict) and isinstance(row.get("level"), int)
+    ]
+    flagged = [entry for entry in levels if entry[2]]
+    candidates = flagged or levels
+    if not candidates:
+        return []
+
+    top_level = min(level for _, level, _ in candidates)
+    scope_levels = {top_level}
+    # Legacy Portugal v1.0.0 uses level 4 for the Azores and level 6 for
+    # mainland districts. The flagged Azores relation identifies that layout.
+    if top_level == 4 and any(
+        level == 4 and metadata[i].get("feature_id") == "pt_r1629146"
+        for i, level, _ in flagged
+    ):
+        scope_levels.add(6)
+    return [i for i, level, _ in candidates if level in scope_levels]
+
+
 def _select_country_scope_feature_indices(
     *,
     feature_index: list[FeatureIndexEntry],
     feature_meta_by_index: list[dict],
 ) -> tuple[list[int], list[int]]:
-    """
-    Choose the geometry features used for country-scope execution.
-
-    If exporter-provided `country_scope_flag` exists, trust that as scope truth
-    but minimize execution geometry to the smallest numeric admin level among
-    the flagged features. This preserves exporter intent while avoiding country
-    checks over every in-scope municipality or subunit.
-
-    Older datasets without `country_scope_flag` continue to fall back to the
-    smallest numeric level present in geometry metadata.
-    """
-    flagged_levels: list[int] = []
-    for meta in feature_meta_by_index:
-        if meta.get("country_scope_flag") is not True:
-            continue
-        level = meta.get("level")
-        if isinstance(level, int):
-            flagged_levels.append(level)
-
-    target_level: int | None = min(flagged_levels) if flagged_levels else None
-    use_flagged_scope = target_level is not None
-
-    if target_level is None:
-        for meta in feature_meta_by_index:
-            level = meta.get("level")
-            if not isinstance(level, int):
-                continue
-            if target_level is None or level < target_level:
-                target_level = level
-
-    if target_level is None:
-        return [], []
-
-    feature_indices: list[int] = []
+    feature_indices = country_scope_feature_indices(feature_meta_by_index)
     part_indices: list[int] = []
-    for feature_idx, feature in enumerate(feature_index):
-        meta = feature_meta_by_index[feature_idx]
-        if use_flagged_scope and meta.get("country_scope_flag") is not True:
-            continue
-        if meta.get("level") != target_level:
-            continue
-        feature_indices.append(feature_idx)
-        for part_idx in range(feature.part_start_idx, feature.part_start_idx + feature.part_count):
-            part_indices.append(part_idx)
+    for feature_idx in feature_indices:
+        feature = feature_index[feature_idx]
+        part_indices.extend(range(feature.part_start_idx, feature.part_start_idx + feature.part_count))
 
     return feature_indices, part_indices
 

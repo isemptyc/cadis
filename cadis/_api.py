@@ -19,6 +19,7 @@ from typing import Any, Callable, Iterable
 from ._cache import resolve_cache_dir
 from ._country_names import country_name_for_iso2
 from ._manager import get_manager
+from .runtime.dataset.ffsf_runtime import country_scope_feature_indices
 from .types import (
     BootstrapResponse,
     DatasetState,
@@ -509,33 +510,9 @@ def _country_scope_bbox_from_dataset(dataset_dir: str | Path) -> tuple[float, fl
     if len(feature_index) != len(raw_meta):
         return None
 
-    flagged_levels = [
-        meta.get("level")
-        for meta in raw_meta
-        if isinstance(meta, dict) and meta.get("country_scope_flag") is True and isinstance(meta.get("level"), int)
-    ]
-    target_level = min(flagged_levels) if flagged_levels else None
-    use_flagged_scope = target_level is not None
-
-    if target_level is None:
-        levels = [
-            meta.get("level")
-            for meta in raw_meta
-            if isinstance(meta, dict) and isinstance(meta.get("level"), int)
-        ]
-        if not levels:
-            return None
-        target_level = min(levels)
-
     selected: list[tuple[float, float, float, float]] = []
-    for feature_idx, (part_start_idx, part_count) in enumerate(feature_index):
-        meta = raw_meta[feature_idx]
-        if not isinstance(meta, dict):
-            continue
-        if use_flagged_scope and meta.get("country_scope_flag") is not True:
-            continue
-        if meta.get("level") != target_level:
-            continue
+    for feature_idx in country_scope_feature_indices(raw_meta):
+        part_start_idx, part_count = feature_index[feature_idx]
         for part_idx in range(part_start_idx, part_start_idx + part_count):
             if 0 <= part_idx < len(part_bboxes):
                 selected.append(part_bboxes[part_idx])
