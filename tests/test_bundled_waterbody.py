@@ -95,7 +95,7 @@ def test_tagus_estuary_and_nearby_lisbon_land() -> None:
     assert index.lookup(38.7, -9.5) == "Atlantic Ocean"
 
 
-def test_lisbon_land_override_leaves_tagus_estuary_as_water() -> None:
+def test_lisbon_override_assigns_portugal_to_tagus_estuary() -> None:
     from cadis.world.cgd_world_resolver import CGDWorldResolver
 
     cgd_path = Path(__file__).resolve().parents[1] / "cadis/world/data/ne.global.v0.1.0.cgd"
@@ -106,7 +106,7 @@ def test_lisbon_land_override_leaves_tagus_estuary_as_water() -> None:
     assert photo["resolution_method"] == "land_override"
 
     estuary = resolver.resolve(38.766572, -9.075)
-    assert estuary["world_result"]["type"] == "open_sea"
+    assert estuary["country"]["iso2"] == "PT"
 
 
 def test_belem_shoreline_can_match_portugal_and_tagus() -> None:
@@ -123,16 +123,52 @@ def test_belem_shoreline_can_match_portugal_and_tagus() -> None:
     assert waterbody is not None
     assert waterbody["names"]["zh-Hant-TW"] == "太加斯河"
 
-    # The river side stays open water, while the inland side leaves Tagus coverage.
+    # The river and inland points share a country, with different waterbody results.
     river = (38.6932694444444, photo[1])
     inland = (38.6934694444444, photo[1])
-    assert resolver.resolve(*river)["world_result"]["type"] == "open_sea"
+    assert resolver.resolve(*river)["country"]["iso2"] == "PT"
     assert index.lookup(*river) == "Tagus River"
     assert resolver.resolve(*inland)["country"]["iso2"] == "PT"
     assert index.lookup(*inland) != "Tagus River"
 
 
-def test_mainland_spain_coastal_gaps_leave_open_water_and_gibraltar() -> None:
+def test_santa_maria_maior_and_nearby_estuary_resolve_to_portugal() -> None:
+    from cadis.world.cgd_world_resolver import CGDWorldResolver
+
+    cgd_path = Path(__file__).resolve().parents[1] / "cadis/world/data/ne.global.v0.1.0.cgd"
+    resolver = CGDWorldResolver(cgd_path=cgd_path)
+
+    photo = resolver.resolve(38.7081611111111, -9.13668611111111)
+    assert photo["country"]["iso2"] == "PT"
+    assert photo["resolution_method"] == "land_override"
+
+    estuary = resolver.resolve(38.705, -9.13668611111111)
+    assert estuary["country"]["iso2"] == "PT"
+
+
+def test_tagus_matches_belem_source_shoreline() -> None:
+    index = _real_waterbody_module().WaterbodyIndex.from_bundled()
+    assert index is not None
+    record = index.lookup_record(38.6920277777778, -9.21548611111111)
+    assert record is not None
+    assert record["names"]["zh-Hant-TW"] == "太加斯河"
+    assert index.lookup(38.7, -10.0) == "Atlantic Ocean"
+
+
+def test_mainland_coastline_coverage_extends_beyond_lisbon() -> None:
+    from cadis.world.cgd_world_resolver import CGDWorldResolver
+
+    cgd_path = Path(__file__).resolve().parents[1] / "cadis/world/data/ne.global.v0.1.0.cgd"
+    resolver = CGDWorldResolver(cgd_path=cgd_path)
+
+    for land in ((41.21038899351082, -8.714381987948284), (37.08564685571571, -8.322499316385548)):
+        assert resolver.resolve(*land)["country"]["iso2"] == "PT"
+
+    assert resolver.resolve(38.766572, -9.075)["country"]["iso2"] == "PT"
+    assert resolver.resolve(38.7, -10.0)["world_result"]["type"] == "open_sea"
+
+
+def test_iberian_coastal_overrides_preserve_country_boundaries() -> None:
     from cadis.world.cgd_world_resolver import CGDWorldResolver
 
     cgd_path = Path(__file__).resolve().parents[1] / "cadis/world/data/ne.global.v0.1.0.cgd"
@@ -143,5 +179,8 @@ def test_mainland_spain_coastal_gaps_leave_open_water_and_gibraltar() -> None:
         assert result["country"]["iso2"] == "ES"
         assert result["resolution_method"] == "land_override"
 
-    assert resolver.resolve(39.4725, -0.30)["world_result"]["type"] == "open_sea"
+    assert resolver.resolve(39.4725, -0.30)["country"]["iso2"] == "ES"
+    assert resolver.resolve(39.4725, 0.1)["world_result"]["type"] == "open_sea"
     assert resolver.resolve(36.12677731661892, -5.3456406617257555)["country"]["iso2"] == "GI"
+    assert resolver.resolve(37.195, -7.419)["country"]["iso2"] == "PT"
+    assert resolver.resolve(37.213, -7.408)["country"]["iso2"] == "ES"
