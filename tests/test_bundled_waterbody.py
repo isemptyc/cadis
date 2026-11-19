@@ -95,6 +95,24 @@ def test_tagus_estuary_and_nearby_lisbon_land() -> None:
     assert index.lookup(38.7, -9.5) == "Atlantic Ocean"
 
 
+def test_river_centerline_buffer_excludes_nearby_dry_land() -> None:
+    index = _real_waterbody_module().WaterbodyIndex.from_bundled()
+    assert index is not None
+
+    # The previous kilometre-scale corridor covered all three land points.
+    for lat, lon in (
+        (48.8444777777778, 2.33471111111111),  # Luxembourg Gardens
+        (47.2129, -1.5579),  # Place du Commerce, Nantes
+        (51.4994, -0.1273),  # Westminster Abbey
+    ):
+        assert index.lookup(lat, lon) is None
+
+    # Verified points on the mapped main channels.
+    assert index.lookup(48.85549873457804, 2.3504698226128053) == "Seine River"
+    assert index.lookup(47.19806250858848, -1.549978371015983) == "Loire River"
+    assert index.lookup(51.5003146, -0.12189) == "Thames River"
+
+
 def test_lisbon_override_assigns_portugal_to_tagus_estuary() -> None:
     from cadis.world.cgd_world_resolver import CGDWorldResolver
 
